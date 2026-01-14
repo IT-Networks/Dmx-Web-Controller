@@ -930,6 +930,84 @@ class DMXController {
                     </div>
                 `;
                 break;
+
+            case 'fire':
+                paramsHTML = `
+                    <div class="form-group">
+                        <label>Geschwindigkeit</label>
+                        <input type="range" id="paramSpeed" class="slider" min="1" max="100" value="50" oninput="app.updateParamValue('speed', this.value / 1000)">
+                        <div class="slider-value" id="paramSpeedValue">50ms</div>
+                    </div>
+                    <div class="form-group">
+                        <label>Intensität</label>
+                        <input type="range" id="paramIntensity" class="slider" min="0" max="100" value="100" oninput="app.updateParamValue('intensity', this.value / 100)">
+                        <div class="slider-value" id="paramIntensityValue">100%</div>
+                    </div>
+                `;
+                break;
+
+            case 'lightning':
+                paramsHTML = `
+                    <div class="form-group">
+                        <label>Min. Verzögerung (Sek)</label>
+                        <input type="range" id="paramMinDelay" class="slider" min="1" max="10" value="5" oninput="app.updateParamValue('min_delay', this.value / 10)">
+                        <div class="slider-value" id="paramMinDelayValue">0.5s</div>
+                    </div>
+                    <div class="form-group">
+                        <label>Max. Verzögerung (Sek)</label>
+                        <input type="range" id="paramMaxDelay" class="slider" min="10" max="50" value="30" oninput="app.updateParamValue('max_delay', this.value / 10)">
+                        <div class="slider-value" id="paramMaxDelayValue">3.0s</div>
+                    </div>
+                `;
+                break;
+
+            case 'scanner':
+                paramsHTML = `
+                    <div class="form-group">
+                        <label>Geschwindigkeit</label>
+                        <input type="range" id="paramSpeed" class="slider" min="1" max="100" value="50" oninput="app.updateParamValue('speed', this.value / 500)">
+                        <div class="slider-value" id="paramSpeedValue">50%</div>
+                    </div>
+                    <div class="form-group">
+                        <label>Bewegungsbereich (Grad)</label>
+                        <input type="range" id="paramRange" class="slider" min="30" max="270" value="180" oninput="app.updateParamValue('range', this.value)">
+                        <div class="slider-value" id="paramRangeValue">180°</div>
+                    </div>
+                `;
+                break;
+
+            case 'matrix':
+                paramsHTML = `
+                    <div class="form-group">
+                        <label>Geschwindigkeit</label>
+                        <input type="range" id="paramSpeed" class="slider" min="1" max="100" value="50" oninput="app.updateParamValue('speed', this.value / 250)">
+                        <div class="slider-value" id="paramSpeedValue">50%</div>
+                    </div>
+                    <div class="form-group">
+                        <label>Muster</label>
+                        <select id="paramPattern" class="input" onchange="app.updateParamValue('pattern', this.value)">
+                            <option value="wave">Welle</option>
+                            <option value="circle">Kreis</option>
+                            <option value="checkerboard">Schachbrett</option>
+                        </select>
+                    </div>
+                `;
+                break;
+
+            case 'twinkle':
+                paramsHTML = `
+                    <div class="form-group">
+                        <label>Geschwindigkeit</label>
+                        <input type="range" id="paramSpeed" class="slider" min="1" max="100" value="50" oninput="app.updateParamValue('speed', this.value / 500)">
+                        <div class="slider-value" id="paramSpeedValue">50%</div>
+                    </div>
+                    <div class="form-group">
+                        <label>Dichte</label>
+                        <input type="range" id="paramDensity" class="slider" min="0" max="100" value="30" oninput="app.updateParamValue('density', this.value / 100)">
+                        <div class="slider-value" id="paramDensityValue">30%</div>
+                    </div>
+                `;
+                break;
         }
 
         paramsContainer.innerHTML = paramsHTML;
@@ -1034,6 +1112,43 @@ class DMXController {
                             const level = this.currentAudioData.overall;
                             const brightness = Math.floor(level * 255);
                             color = `rgb(${brightness}, ${brightness / 2}, ${brightness})`;
+                        }
+                        break;
+
+                    case 'fire':
+                        const flicker = Math.random() * 0.3 + 0.7;
+                        const fireRed = Math.floor(255 * flicker);
+                        const fireGreen = Math.floor((100 * flicker) * Math.random());
+                        color = `rgb(${fireRed}, ${fireGreen}, 0)`;
+                        break;
+
+                    case 'lightning':
+                        if (frame % 60 < 3 || (frame % 60 >= 5 && frame % 60 < 7)) {
+                            color = '#ffffff';
+                        } else {
+                            color = '#1e293b';
+                        }
+                        break;
+
+                    case 'scanner':
+                        const scanPos = (Math.sin(frame * 0.05) + 1) / 2;
+                        const activeScanner = Math.floor(scanPos * numLights);
+                        color = i === activeScanner ? '#3b82f6' : '#1e293b';
+                        break;
+
+                    case 'matrix':
+                        const waveIntensity = (Math.sin(frame * 0.1 + i * 0.5) + 1) / 2;
+                        const matrixBrightness = Math.floor(waveIntensity * 255);
+                        color = `rgb(${matrixBrightness}, ${matrixBrightness}, ${matrixBrightness})`;
+                        break;
+
+                    case 'twinkle':
+                        if (Math.random() < 0.3) {
+                            const twinkleBrightness = Math.floor(Math.random() * 55 + 200);
+                            color = `rgb(${twinkleBrightness}, ${twinkleBrightness}, ${twinkleBrightness})`;
+                        } else {
+                            const dimBrightness = Math.floor(Math.random() * 50);
+                            color = `rgb(${dimBrightness}, ${dimBrightness}, ${dimBrightness})`;
                         }
                         break;
                 }

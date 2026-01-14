@@ -434,6 +434,196 @@ class EffectEngine:
 
                 await asyncio.sleep(0.02)
 
+    @staticmethod
+    async def fire(target_ids: List[str], speed: float = 0.05, intensity: float = 1.0, is_group: bool = False):
+        """Flackerndes Feuer-Effekt (Orange/Rot)"""
+        import random
+
+        while True:
+            target_devices = []
+            if is_group:
+                for group_id in target_ids:
+                    target_devices.extend(get_group_devices(group_id))
+            else:
+                target_devices = [d for d in devices if d['id'] in target_ids]
+
+            for device in target_devices:
+                # Random flicker with orange/red tones
+                base_red = int(255 * intensity)
+                base_green = int(100 * intensity * random.uniform(0.3, 0.7))
+                base_blue = 0
+
+                # Add flicker
+                flicker = random.uniform(0.7, 1.0)
+                red = int(base_red * flicker)
+                green = int(base_green * flicker)
+
+                if device['device_type'] in ['rgb', 'rgbw'] and len(device['values']) >= 3:
+                    device['values'][0] = red
+                    device['values'][1] = green
+                    device['values'][2] = base_blue
+                elif device['device_type'] == 'dimmer':
+                    device['values'][0] = red
+
+                send_device_dmx(device)
+
+            await asyncio.sleep(speed)
+
+    @staticmethod
+    async def lightning(target_ids: List[str], min_delay: float = 0.5, max_delay: float = 3.0, is_group: bool = False):
+        """Zufällige Blitz-Effekte"""
+        import random
+
+        while True:
+            target_devices = []
+            if is_group:
+                for group_id in target_ids:
+                    target_devices.extend(get_group_devices(group_id))
+            else:
+                target_devices = [d for d in devices if d['id'] in target_ids]
+
+            # Random lightning strike
+            flash_count = random.randint(1, 3)
+
+            for _ in range(flash_count):
+                # Flash on
+                for device in target_devices:
+                    for i in range(len(device['values'])):
+                        device['values'][i] = 255
+                    send_device_dmx(device)
+
+                await asyncio.sleep(random.uniform(0.03, 0.08))
+
+                # Flash off
+                for device in target_devices:
+                    for i in range(len(device['values'])):
+                        device['values'][i] = 0
+                    send_device_dmx(device)
+
+                if flash_count > 1:
+                    await asyncio.sleep(random.uniform(0.05, 0.15))
+
+            # Wait for next lightning
+            await asyncio.sleep(random.uniform(min_delay, max_delay))
+
+    @staticmethod
+    async def scanner(target_ids: List[str], speed: float = 0.1, range_degrees: int = 180, is_group: bool = False):
+        """Scanner-Effekt für Moving Heads (Pan/Tilt Sweep)"""
+        direction = 1
+        position = 0
+
+        while True:
+            target_devices = []
+            if is_group:
+                for group_id in target_ids:
+                    target_devices.extend(get_group_devices(group_id))
+            else:
+                target_devices = [d for d in devices if d['id'] in target_ids]
+
+            # Calculate pan position (0-255)
+            pan_value = int((position / range_degrees) * 255)
+
+            for device in target_devices:
+                # Set pan if available
+                if len(device['values']) > 0:
+                    device['values'][0] = pan_value
+
+                # Keep light on
+                if len(device['values']) > 5:
+                    device['values'][5] = 255  # Dimmer
+
+                send_device_dmx(device)
+
+            # Update position
+            position += direction * 5
+            if position >= range_degrees:
+                position = range_degrees
+                direction = -1
+            elif position <= 0:
+                position = 0
+                direction = 1
+
+            await asyncio.sleep(speed)
+
+    @staticmethod
+    async def matrix(target_ids: List[str], speed: float = 0.2, pattern: str = 'wave', is_group: bool = False):
+        """Matrix-Effekt für Grid-Arrangements"""
+        import math
+        frame = 0
+
+        while True:
+            target_devices = []
+            if is_group:
+                for group_id in target_ids:
+                    target_devices.extend(get_group_devices(group_id))
+            else:
+                target_devices = [d for d in devices if d['id'] in target_ids]
+
+            num_devices = len(target_devices)
+            if num_devices == 0:
+                await asyncio.sleep(speed)
+                continue
+
+            # Calculate grid dimensions (approximate square)
+            cols = int(math.sqrt(num_devices))
+            rows = (num_devices + cols - 1) // cols
+
+            for idx, device in enumerate(target_devices):
+                x = idx % cols
+                y = idx // cols
+
+                if pattern == 'wave':
+                    # Horizontal wave
+                    intensity = (math.sin(frame * 0.1 + x * 0.5) + 1) / 2
+                elif pattern == 'circle':
+                    # Circular pattern
+                    center_x = cols / 2
+                    center_y = rows / 2
+                    distance = math.sqrt((x - center_x) ** 2 + (y - center_y) ** 2)
+                    intensity = (math.sin(frame * 0.2 - distance * 0.5) + 1) / 2
+                else:
+                    # Checkerboard
+                    intensity = 1.0 if (x + y + frame // 5) % 2 == 0 else 0.0
+
+                brightness = int(intensity * 255)
+
+                for i in range(len(device['values'])):
+                    device['values'][i] = brightness
+                send_device_dmx(device)
+
+            frame += 1
+            await asyncio.sleep(speed)
+
+    @staticmethod
+    async def twinkle(target_ids: List[str], speed: float = 0.1, density: float = 0.3, is_group: bool = False):
+        """Glitzer-Effekt mit zufälligen Blitzen"""
+        import random
+
+        while True:
+            target_devices = []
+            if is_group:
+                for group_id in target_ids:
+                    target_devices.extend(get_group_devices(group_id))
+            else:
+                target_devices = [d for d in devices if d['id'] in target_ids]
+
+            for device in target_devices:
+                # Random chance to twinkle
+                if random.random() < density:
+                    # Bright flash
+                    brightness = random.randint(200, 255)
+                    for i in range(len(device['values'])):
+                        device['values'][i] = brightness
+                else:
+                    # Dim or off
+                    brightness = random.randint(0, 50)
+                    for i in range(len(device['values'])):
+                        device['values'][i] = brightness
+
+                send_device_dmx(device)
+
+            await asyncio.sleep(speed)
+
 
 effect_engine = EffectEngine()
 
@@ -477,6 +667,51 @@ async def start_effect(effect_id: str, effect_type: str, target_ids: List[str],
                     mode=params.get('mode', 'intensity'),
                     frequency_band=params.get('frequency_band', 'overall'),
                     sensitivity=params.get('sensitivity', 1.0),
+                    is_group=is_group
+                )
+            )
+        elif effect_type == 'fire':
+            task = asyncio.create_task(
+                effect_engine.fire(
+                    target_ids,
+                    speed=params.get('speed', 0.05),
+                    intensity=params.get('intensity', 1.0),
+                    is_group=is_group
+                )
+            )
+        elif effect_type == 'lightning':
+            task = asyncio.create_task(
+                effect_engine.lightning(
+                    target_ids,
+                    min_delay=params.get('min_delay', 0.5),
+                    max_delay=params.get('max_delay', 3.0),
+                    is_group=is_group
+                )
+            )
+        elif effect_type == 'scanner':
+            task = asyncio.create_task(
+                effect_engine.scanner(
+                    target_ids,
+                    speed=params.get('speed', 0.1),
+                    range_degrees=params.get('range', 180),
+                    is_group=is_group
+                )
+            )
+        elif effect_type == 'matrix':
+            task = asyncio.create_task(
+                effect_engine.matrix(
+                    target_ids,
+                    speed=params.get('speed', 0.2),
+                    pattern=params.get('pattern', 'wave'),
+                    is_group=is_group
+                )
+            )
+        elif effect_type == 'twinkle':
+            task = asyncio.create_task(
+                effect_engine.twinkle(
+                    target_ids,
+                    speed=params.get('speed', 0.1),
+                    density=params.get('density', 0.3),
                     is_group=is_group
                 )
             )
