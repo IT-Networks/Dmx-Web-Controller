@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DMX Web Controller</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+    <div class="app">
+        <!-- Header -->
+        <header class="header">
+            <div class="header-content">
+                <h1 class="logo">🎭 DMX Controller</h1>
+                <div class="header-actions">
+                    <button class="btn btn-primary" onclick="app.showAddDevice()">
+                        <span class="icon">+</span> Gerät
+                    </button>
+                    <button class="btn btn-secondary" onclick="app.showAddScene()">
+                        <span class="icon">+</span> Szene
+                    </button>
+                </div>
+            </div>
+        </header>
+
+        <!-- Szenen -->
+        <section class="scenes-section">
+            <div class="scenes-header">
+                <h2>Szenen</h2>
+            </div>
+            <div class="scenes-container" id="scenesContainer">
+                <div class="empty-state">Keine Szenen vorhanden</div>
+            </div>
+        </section>
+
+        <!-- Geräte -->
+        <section class="devices-section">
+            <div class="devices-container" id="devicesContainer">
+                <div class="empty-state">Keine Geräte vorhanden</div>
+            </div>
+        </section>
+    </div>
+
+    <!-- Modal: Gerät hinzufügen -->
+    <div class="modal" id="addDeviceModal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>Gerät hinzufügen</h2>
+                <button class="modal-close" onclick="app.closeModal('addDeviceModal')">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label>Gerätename</label>
+                    <input type="text" id="deviceName" placeholder="z.B. Bühnenlicht" class="input">
+                </div>
+                <div class="form-group">
+                    <label>IP-Adresse</label>
+                    <input type="text" id="deviceIp" placeholder="192.168.1.100" class="input">
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>Universe</label>
+                        <input type="number" id="deviceUniverse" value="0" class="input">
+                    </div>
+                    <div class="form-group">
+                        <label>Start-Kanal</label>
+                        <input type="number" id="deviceChannel" value="1" min="1" max="512" class="input">
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label>Gerätetyp</label>
+                    <div class="button-group" id="deviceTypeGroup">
+                        <button class="btn-option active" data-type="dimmer" onclick="app.selectDeviceType('dimmer')">Dimmer</button>
+                        <button class="btn-option" data-type="rgb" onclick="app.selectDeviceType('rgb')">RGB</button>
+                        <button class="btn-option" data-type="rgbw" onclick="app.selectDeviceType('rgbw')">RGBW</button>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="app.closeModal('addDeviceModal')">Abbrechen</button>
+                <button class="btn btn-primary" onclick="app.addDevice()">Hinzufügen</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal: Szene hinzufügen -->
+    <div class="modal" id="addSceneModal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>Szene erstellen</h2>
+                <button class="modal-close" onclick="app.closeModal('addSceneModal')">&times;</button>
+            </div>
+            <div class="modal-body">
+                <p class="info-text">Aktuelle Gerätewerte werden gespeichert</p>
+                <div class="form-group">
+                    <label>Szenenname</label>
+                    <input type="text" id="sceneName" placeholder="z.B. Redner, Musiker" class="input">
+                </div>
+                <div class="form-group">
+                    <label>Farbe</label>
+                    <div class="color-picker">
+                        <button class="color-btn active" data-color="blue" onclick="app.selectSceneColor('blue')" style="background: #3b82f6"></button>
+                        <button class="color-btn" data-color="green" onclick="app.selectSceneColor('green')" style="background: #10b981"></button>
+                        <button class="color-btn" data-color="red" onclick="app.selectSceneColor('red')" style="background: #ef4444"></button>
+                        <button class="color-btn" data-color="orange" onclick="app.selectSceneColor('orange')" style="background: #f59e0b"></button>
+                        <button class="color-btn" data-color="purple" onclick="app.selectSceneColor('purple')" style="background: #8b5cf6"></button>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="app.closeModal('addSceneModal')">Abbrechen</button>
+                <button class="btn btn-primary" onclick="app.addScene()">Szene erstellen</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Toast Notifications -->
+    <div class="toast-container" id="toastContainer"></div>
+
+    <script src="/static/js/app.js"></script>
+</body>
+</html>
