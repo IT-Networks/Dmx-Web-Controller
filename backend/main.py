@@ -15,8 +15,15 @@ import socket
 import struct
 from threading import Thread
 import time
+import os
 
 app = FastAPI(title="DMX Web Controller")
+
+# Determine base path for files
+BASE_DIR = Path(__file__).parent.parent
+FRONTEND_DIR = BASE_DIR / "frontend"
+if not FRONTEND_DIR.exists():
+    FRONTEND_DIR = Path("/app/frontend")  # Docker fallback
 
 # CORS für mehrere Clients
 app.add_middleware(
@@ -28,10 +35,13 @@ app.add_middleware(
 )
 
 # Datenpfade
-DATA_DIR = Path("/data")
+DATA_DIR = Path("/data") if Path("/data").exists() else BASE_DIR / "data"
 DATA_DIR.mkdir(exist_ok=True)
 CONFIG_FILE = DATA_DIR / "dmx_config.json"
 SCENES_FILE = DATA_DIR / "dmx_scenes.json"
+
+# Mount static files
+app.mount("/static", StaticFiles(directory=str(FRONTEND_DIR)), name="static")
 
 # Globale States
 devices = []
@@ -129,23 +139,23 @@ def send_device_dmx(device):
 
 
 # Fade-Funktion
-def fade_to_scene(scene_id: str):
+async def fade_to_scene(scene_id: str):
     """Führt Fade zur Szene durch"""
     global is_fading
-    
+
     if is_fading:
         return
-    
+
     is_fading = True
     scene = next((s for s in scenes if s['id'] == scene_id), None)
-    
+
     if not scene:
         is_fading = False
         return
-    
+
     steps = 50
     delay = 2.0 / steps
-    
+
     # Sammle Fade-Daten
     fade_data = []
     for device in devices:
@@ -157,32 +167,32 @@ def fade_to_scene(scene_id: str):
                 'start': start_values,
                 'target': target_values
             })
-    
+
     # Führe Fade durch
     for step in range(steps + 1):
         progress = step / steps
-        
+
         for data in fade_data:
             device = data['device']
             start = data['start']
             target = data['target']
-            
+
             for i in range(len(device['values'])):
                 if i < len(target):
                     device['values'][i] = int(start[i] + (target[i] - start[i]) * progress)
-            
+
             send_device_dmx(device)
-        
-        time.sleep(delay)
-    
+
+        await asyncio.sleep(delay)
+
     save_devices()
     is_fading = False
-    
+
     # Broadcast Update
-    asyncio.create_task(broadcast_update({
+    await broadcast_update({
         'type': 'devices_updated',
         'devices': devices
-    }))
+    })
 
 
 # API Endpoints
@@ -194,7 +204,7 @@ async def startup():
 @app.get("/")
 async def root():
     """Serve Frontend"""
-    return FileResponse('/app/frontend/index.html')
+    return FileResponse(str(FRONTEND_DIR / "Index.html"))
 
 
 @app.get("/api/devices")
@@ -300,10 +310,9 @@ async def delete_scene(scene_id: str):
 @app.post("/api/scenes/{scene_id}/activate")
 async def activate_scene(scene_id: str):
     """Aktiviert Szene mit Fade"""
-    thread = Thread(target=fade_to_scene, args=(scene_id,))
-    thread.daemon = True
-    thread.start()
-    
+    # Start fade as background task
+    asyncio.create_task(fade_to_scene(scene_id))
+
     return {"success": True, "fading": True}
 
 
