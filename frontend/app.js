@@ -7,18 +7,21 @@ class DMXController {
         this.scenes = [];
         this.groups = [];
         this.effects = [];
+        this.fixtures = {};
+        this.selectedFixture = null;
         this.selectedDeviceType = 'dimmer';
         this.selectedSceneColor = 'blue';
         this.currentTab = 'devices';
         this.currentEffect = null;
         this.reconnectInterval = null;
-        
+
         this.init();
     }
-    
+
     init() {
         this.connectWebSocket();
         this.loadData();
+        this.loadFixtures();
         this.setupKeyboardShortcuts();
     }
     
@@ -187,30 +190,38 @@ class DMXController {
         const ip = document.getElementById('deviceIp').value.trim();
         const universe = parseInt(document.getElementById('deviceUniverse').value);
         const startChannel = parseInt(document.getElementById('deviceChannel').value);
-        
+
         if (!name || !ip) {
             this.showToast('Bitte alle Felder ausfüllen', 'error');
             return;
         }
-        
-        const channelCounts = { dimmer: 1, rgb: 3, rgbw: 4 };
-        
-        const device = {
+
+        let device = {
             name,
             ip,
             universe,
-            start_channel: startChannel,
-            channel_count: channelCounts[this.selectedDeviceType],
-            device_type: this.selectedDeviceType
+            start_channel: startChannel
         };
-        
+
+        // Use fixture if selected, otherwise use manual type
+        if (this.selectedFixture) {
+            device.channel_count = this.selectedFixture.channels;
+            device.device_type = this.selectedFixture.category;
+            device.fixture_id = this.selectedFixture.id;
+            device.channel_layout = this.selectedFixture.channel_layout;
+        } else {
+            const channelCounts = { dimmer: 1, rgb: 3, rgbw: 4 };
+            device.channel_count = channelCounts[this.selectedDeviceType];
+            device.device_type = this.selectedDeviceType;
+        }
+
         try {
             const response = await fetch('/api/devices', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(device)
             });
-            
+
             if (response.ok) {
                 this.showToast('Gerät hinzugefügt', 'success');
                 this.closeModal('addDeviceModal');
@@ -218,6 +229,10 @@ class DMXController {
                 document.getElementById('deviceIp').value = '';
                 document.getElementById('deviceUniverse').value = '0';
                 document.getElementById('deviceChannel').value = '1';
+                document.getElementById('fixtureSelect').value = '';
+                this.selectedFixture = null;
+                document.getElementById('manualTypeGroup').style.display = 'block';
+                document.getElementById('fixtureInfo').style.display = 'none';
             }
         } catch (error) {
             console.error('Error adding device:', error);
@@ -574,3 +589,79 @@ class DMXController {
 }
 
 const app = new DMXController();
+    
+    // ===== Fixture Library =====
+    async loadFixtures() {
+        try {
+            const response = await fetch('/api/fixtures/categories');
+            const data = await response.json();
+            this.fixtures = data.categories;
+            this.populateFixtureSelect();
+        } catch (error) {
+            console.error('Error loading fixtures:', error);
+        }
+    }
+    
+    populateFixtureSelect() {
+        const select = document.getElementById('fixtureSelect');
+        const categoryNames = {
+            'dimmer': 'Dimmer',
+            'rgb': 'RGB',
+            'rgbw': 'RGBW',
+            'moving_head': 'Moving Heads',
+            'par': 'PAR-Cans',
+            'led_bar': 'LED Bars',
+            'wash': 'Wash Lights',
+            'beam': 'Beam Lights',
+            'strobe': 'Strobes',
+            'laser': 'Laser',
+            'effect': 'Effekte'
+        };
+        
+        for (const [category, fixtures] of Object.entries(this.fixtures)) {
+            const optgroup = document.createElement('optgroup');
+            optgroup.label = categoryNames[category] || category;
+            
+            fixtures.forEach(fixture => {
+                const option = document.createElement('option');
+                option.value = fixture.id;
+                option.textContent = `${fixture.manufacturer} ${fixture.model} (${fixture.channels}CH)`;
+                optgroup.appendChild(option);
+            });
+            
+            select.appendChild(optgroup);
+        }
+    }
+    
+    async selectFixture() {
+        const fixtureId = document.getElementById('fixtureSelect').value;
+        const manualTypeGroup = document.getElementById('manualTypeGroup');
+        const fixtureInfo = document.getElementById('fixtureInfo');
+        const fixtureInfoText = document.getElementById('fixtureInfoText');
+        
+        if (!fixtureId) {
+            manualTypeGroup.style.display = 'block';
+            fixtureInfo.style.display = 'none';
+            this.selectedFixture = null;
+            return;
+        }
+        
+        try {
+            const response = await fetch(`/api/fixtures/${fixtureId}`);
+            const data = await response.json();
+            const fixture = data.fixture;
+            
+            if (fixture) {
+                this.selectedFixture = fixture;
+                manualTypeGroup.style.display = 'none';
+                fixtureInfo.style.display = 'block';
+                fixtureInfoText.textContent = `${fixture.manufacturer} ${fixture.model} - ${fixture.channels} Kanäle`;
+                
+                if (!document.getElementById('deviceName').value) {
+                    document.getElementById('deviceName').value = `${fixture.manufacturer} ${fixture.model}`;
+                }
+            }
+        } catch (error) {
+            console.error('Error loading fixture:', error);
+        }
+    }

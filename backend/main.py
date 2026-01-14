@@ -50,6 +50,7 @@ devices = []
 scenes = []
 groups = []
 effects = []
+fixtures = []
 connected_clients: List[WebSocket] = []
 is_fading = False
 active_effects: Dict[str, asyncio.Task] = {}  # effect_id -> Task
@@ -107,8 +108,8 @@ async def broadcast_update(data: dict):
 
 # Daten laden/speichern
 def load_data():
-    """Lädt Geräte, Szenen, Gruppen und Effekte"""
-    global devices, scenes, groups, effects
+    """Lädt Geräte, Szenen, Gruppen, Effekte und Fixtures"""
+    global devices, scenes, groups, effects, fixtures
 
     if CONFIG_FILE.exists():
         with open(CONFIG_FILE, 'r') as f:
@@ -125,6 +126,13 @@ def load_data():
     if EFFECTS_FILE.exists():
         with open(EFFECTS_FILE, 'r') as f:
             effects = json.load(f)
+
+    # Load fixture library
+    fixtures_file = BASE_DIR / "backend" / "fixtures.json"
+    if fixtures_file.exists():
+        with open(fixtures_file, 'r') as f:
+            fixture_data = json.load(f)
+            fixtures = fixture_data.get('fixtures', [])
 
 
 def save_devices():
@@ -808,6 +816,39 @@ async def trigger_companion_action(data: dict):
         return {"success": True}
 
     return {"success": False, "error": "Unknown action type"}
+
+
+# Fixture Library API
+@app.get("/api/fixtures")
+async def get_fixtures():
+    """Gibt alle verfügbaren Fixtures aus der Library zurück"""
+    return {"fixtures": fixtures}
+
+
+@app.get("/api/fixtures/categories")
+async def get_fixture_categories():
+    """Gibt alle verfügbaren Fixture-Kategorien zurück"""
+    categories = {}
+    for fixture in fixtures:
+        category = fixture.get('category', 'other')
+        if category not in categories:
+            categories[category] = []
+        categories[category].append({
+            'id': fixture['id'],
+            'manufacturer': fixture['manufacturer'],
+            'model': fixture['model'],
+            'channels': fixture['channels']
+        })
+    return {"categories": categories}
+
+
+@app.get("/api/fixtures/{fixture_id}")
+async def get_fixture(fixture_id: str):
+    """Gibt Details zu einem spezifischen Fixture zurück"""
+    fixture = next((f for f in fixtures if f['id'] == fixture_id), None)
+    if fixture:
+        return {"fixture": fixture}
+    return {"error": "Fixture not found"}, 404
 
 
 # WebSocket für Echtzeit-Updates
