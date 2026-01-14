@@ -36,13 +36,45 @@ Eine moderne, browserbasierte Steuerungslösung für DMX-Lichtanlagen mit Art-Ne
 - **Echtzeit-Synchronisation**: Änderungen wirken sofort auf alle Gruppengeräte
 
 ### ✨ Effekt-Engine
+**Klassische Effekte:**
 - **Stroboskop**: Hochgeschwindigkeits-Blitzeffekt mit einstellbarer Frequenz
 - **Regenbogen**: Sanfter HSV-Farbzyklus durch das gesamte Spektrum
 - **Lauflicht (Chase)**: Sequentielle Aktivierung von Geräten
 - **Pulsieren**: Atmende Helligkeitsmodulation
 - **Farbwechsel**: Smooth Fades zwischen benutzerdefinierten Farben
+
+**Erweiterte Effekte:**
+- **Feuer** 🔥: Realistischer Flackereffekt mit Orange/Rot-Tönen
+- **Blitz** ⚡: Zufällige Lightning-Strikes mit Multi-Flash
+- **Scanner** 🔦: Moving Head Pan-Sweep-Bewegungen
+- **Matrix** 📊: 2D Grid Patterns (Wave, Circle, Checkerboard)
+- **Funkeln** ✨: Random Sparkle-Effekt mit konfigurierbarer Dichte
+
+**Features:**
 - **Echtzeit-Steuerung**: Start/Stop von Effekten während der Ausführung
 - **Gruppen & Geräte**: Effekte auf einzelne Geräte oder ganze Gruppen anwendbar
+- **Parameteranpassung**: Speed, Intensity, Pattern individuell einstellbar
+
+### 🎬 Timeline & Sequenzen
+- **Timeline-Editor**: Erstelle automatisierte Lichtabläufe
+- **Sequenz-Steps**: Kombiniere Szenen, Effekte und Pausen
+- **Loop-Modus**: Endlos-Wiederholung für wiederkehrende Events
+- **Dauer-Kontrolle**: Präzise Zeitsteuerung für jeden Step
+- **Playback-Engine**: Zuverlässige Wiedergabe mit Resource Management
+
+### 🎵 Audio-Reaktive Effekte
+- **Beat Detection**: Echtzeit-Erkennung von Musik-Beats
+- **BPM-Messung**: Automatische Tempo-Erkennung (60-200 BPM)
+- **Frequenzband-Analyse**: Bass, Mid, High, Overall
+- **Sound-Reactive Modes**: Intensity, Color, Strobe
+- **Audio-Visualizer**: Echtzeit-Frequenz-Anzeige
+- **Sensitivität**: Anpassbare Reaktionsstärke
+
+### 📚 Fixture Library
+- **16 vordefinierte Geräte**: Professionelle Fixture-Definitionen
+- **Hersteller-Support**: Eurolite, Stairville, Cameo, Showtec u.v.m.
+- **Kanal-Layouts**: Automatische Kanal-Zuordnung
+- **One-Click-Setup**: Gerät aus Library wählen und loslegen
 
 ### 🎮 Companion Integration
 - **Stream Deck Support**: Vollständige Bitfocus Companion-Integration
@@ -50,6 +82,14 @@ Eine moderne, browserbasierte Steuerungslösung für DMX-Lichtanlagen mit Art-Ne
 - **Gruppen-Steuerung**: On/Off/Toggle für Gerätegruppen
 - **Effekt-Kontrolle**: Effekte starten und stoppen
 - **Auto-Discovery**: Alle Aktionen werden automatisch bereitgestellt
+
+### 🛡️ Stabilität & Performance
+- **Automatische Backups**: Backup vor jedem Save (7 Tage Retention)
+- **Error Recovery**: Automatische Wiederherstellung bei Fehlern
+- **DMX-Caching**: Nur geänderte Werte werden gesendet (~70% Traffic-Reduktion)
+- **Resource Limits**: Schutz vor Überlastung (Max 20 Effekte, 5 Sequenzen)
+- **Input Validation**: Umfassende Validierung aller Eingaben
+- **Structured Logging**: Detaillierte Logs für Debugging
 
 ### 🎨 Moderne UI/UX
 - **Dark Theme**: Professionelles dunkles Design
@@ -69,8 +109,11 @@ Eine moderne, browserbasierte Steuerungslösung für DMX-Lichtanlagen mit Art-Ne
 
 ## 🚀 Schnellstart
 
+> **👉 Neu hier? Schau dir den [ausführlichen QUICKSTART Guide](QUICKSTART.md) an!**
+> Schritt-für-Schritt Anleitung für Anfänger mit Troubleshooting und FAQ.
+
 ### Voraussetzungen
-- Docker & Docker Compose
+- Docker & Docker Compose (oder Python 3.11+)
 - Art-Net fähiges DMX-Interface (z.B. OLA, QLC+, ENTTEC, etc.)
 - Netzwerkverbindung zu DMX-Hardware
 
@@ -93,6 +136,14 @@ http://localhost:8000
 ```
 
 Das war's! Der DMX Controller ist nun einsatzbereit. 🎉
+
+### Alternative: Python (ohne Docker)
+```bash
+cd backend
+pip install -r requirements.txt
+python main.py
+# Öffne http://localhost:8000
+```
 
 ---
 
@@ -157,16 +208,28 @@ Die aktuellen Werte aller Geräte werden gespeichert.
 
 ```
 Dmx-Web-Controller/
-├── main.py              # FastAPI Backend + Art-Net Controller
-├── app.js               # Frontend JavaScript
-├── Index.html           # Web-Interface
-├── style.css            # Styling
-├── Dockerfile           # Container-Build
-├── Docker compose       # Deployment-Konfiguration
-├── data/                # Persistente Daten (auto-generiert)
-│   ├── dmx_config.json  # Geräte-Konfiguration
-│   └── dmx_scenes.json  # Gespeicherte Szenen
-└── README.md            # Diese Datei
+├── backend/
+│   ├── main.py              # FastAPI Backend + Art-Net Controller
+│   ├── fixtures.json        # Fixture Library (16 Geräte)
+│   ├── requirements.txt     # Python Dependencies
+│   └── dmx_controller.log   # Application Log
+├── frontend/
+│   ├── Index.html           # Web-Interface
+│   ├── app.js               # Frontend JavaScript
+│   ├── style.css            # Styling & Dark Theme
+│   └── audioAnalyzer.js     # Beat Detection & Audio Analysis
+├── data/                    # Persistente Daten (auto-generiert)
+│   ├── dmx_config.json      # Geräte-Konfiguration
+│   ├── dmx_scenes.json      # Gespeicherte Szenen
+│   ├── dmx_groups.json      # Gruppen
+│   ├── dmx_effects.json     # Effekt-Definitionen
+│   ├── dmx_sequences.json   # Timeline-Sequenzen
+│   └── backups/             # Automatische Backups (7 Tage)
+├── Dockerfile               # Container-Build
+├── docker-compose.yml       # Deployment-Konfiguration
+├── README.md                # Hauptdokumentation
+├── QUICKSTART.md            # Schnellstart für Anfänger
+└── .gitignore               # Git Ignore Patterns
 ```
 
 ---
@@ -213,6 +276,75 @@ Sollte mit allen Art-Net kompatiblen Geräten funktionieren.
 - Max. **512 Kanäle** pro Universe (DMX-Standard)
 - **UDP Broadcast** erfordert Bridge-Netzwerk-Modus
 - Bei sehr vielen Geräten (>50) kann Performance beeinträchtigt werden
+
+---
+
+## 🔧 Troubleshooting
+
+### Problem: "Keine Verbindung zum Server"
+
+**Lösung:**
+```bash
+# Docker: Status prüfen
+docker ps
+docker logs dmx-controller
+
+# Python: Prozess prüfen
+ps aux | grep python
+```
+
+### Problem: "Gerät reagiert nicht"
+
+**Checkliste:**
+1. ✅ Ist die **IP-Adresse** korrekt? (`ping [IP]`)
+2. ✅ Ist das **richtige Universe** eingestellt?
+3. ✅ Stimmt der **Start-Kanal**?
+4. ✅ Ist **Port 6454 (UDP)** in der Firewall offen?
+5. ✅ Sind Controller und DMX-Interface **im gleichen Netzwerk**?
+
+**Art-Net Traffic testen:**
+```bash
+# Linux/Mac
+sudo tcpdump -i any udp port 6454
+
+# Windows (Wireshark)
+# Filter: udp.port == 6454
+```
+
+### Problem: "Beat Detection funktioniert nicht"
+
+**Lösungen:**
+- Browser-Mikrofon-Zugriff erlauben (Schloss-Symbol in Adresszeile)
+- Sensitivität erhöhen (versuche 2.0-3.0)
+- Prüfe, ob Audio-Visualizer sich bewegt
+- Nutze "Overall" statt spezifischer Frequenzbänder
+
+### Problem: "Performance-Probleme"
+
+**Optimierungen:**
+- Reduziere die Anzahl gleichzeitig aktiver Effekte (Max: 20)
+- Verwende Gruppen statt individueller Geräte
+- Deaktiviere Sound-Reactive wenn nicht benötigt
+- Prüfe Netzwerk-Latenz: `ping -c 10 [DMX-Interface-IP]`
+
+### Weitere Hilfe
+
+**Logs anschauen:**
+```bash
+# Docker
+docker logs -f dmx-controller
+
+# Python
+tail -f backend/dmx_controller.log
+```
+
+**API-Dokumentation:**
+- Swagger UI: http://localhost:8000/docs
+- ReDoc: http://localhost:8000/redoc
+
+**Community Support:**
+- [GitHub Issues](https://github.com/IT-Networks/Dmx-Web-Controller/issues)
+- [Discussions](https://github.com/IT-Networks/Dmx-Web-Controller/discussions)
 
 ---
 
@@ -286,17 +418,25 @@ Beiträge sind willkommen! Hier sind einige Ideen:
 
 ## 📋 Roadmap
 
-- [x] **Gruppen**: Mehrere Geräte gleichzeitig steuern ✅
-- [x] **Effekte**: Vordefinierte Lichteffekte (Strobe, Rainbow, etc.) ✅
-- [x] **Moderne UI**: Dark Theme mit Sidebar-Navigation ✅
-- [x] **Companion Integration**: Stream Deck Support ✅
-- [ ] **Timeline**: Zeitbasierte Szenen-Abfolgen
+### ✅ Fertiggestellt
+- [x] **Gruppen**: Mehrere Geräte gleichzeitig steuern
+- [x] **Effekte**: 10 vordefinierte Lichteffekte
+- [x] **Moderne UI**: Dark Theme mit Sidebar-Navigation
+- [x] **Companion Integration**: Stream Deck Support
+- [x] **Timeline**: Zeitbasierte Szenen-Abfolgen mit Loop
+- [x] **Fixture Library**: 16 vordefinierte Gerätedefinitionen
+- [x] **Audio-Reaktivität**: Beat Detection & Sound-Reactive Effects
+- [x] **Stability**: Backups, Error Recovery, Input Validation
+- [x] **Performance**: DMX-Caching, Resource Management
+
+### 🚧 In Planung
 - [ ] **MIDI Integration**: Steuerung via MIDI-Controller
-- [ ] **Fixture Library**: Vordefinierte Gerätedefinitionen
-- [ ] **Mobile App**: Native iOS/Android App
+- [ ] **Mobile App**: Native iOS/Android App (PWA)
 - [ ] **Backup/Restore**: Konfiguration exportieren/importieren
 - [ ] **Effect Designer**: Visueller Editor für eigene Effekte
 - [ ] **Multi-Universe UI**: Bessere Verwaltung mehrerer Universen
+- [ ] **Fixture Editor**: Eigene Fixture-Definitionen erstellen
+- [ ] **Cloud Sync**: Konfiguration über mehrere Instanzen synchronisieren
 
 ---
 
