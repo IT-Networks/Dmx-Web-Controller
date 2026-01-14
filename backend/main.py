@@ -41,6 +41,7 @@ CONFIG_FILE = DATA_DIR / "dmx_config.json"
 SCENES_FILE = DATA_DIR / "dmx_scenes.json"
 GROUPS_FILE = DATA_DIR / "dmx_groups.json"
 EFFECTS_FILE = DATA_DIR / "dmx_effects.json"
+SEQUENCES_FILE = DATA_DIR / "dmx_sequences.json"
 
 # Mount static files
 app.mount("/static", StaticFiles(directory=str(FRONTEND_DIR)), name="static")
@@ -51,9 +52,11 @@ scenes = []
 groups = []
 effects = []
 fixtures = []
+sequences = []  # Timeline sequences
 connected_clients: List[WebSocket] = []
 is_fading = False
 active_effects: Dict[str, asyncio.Task] = {}  # effect_id -> Task
+active_sequences: Dict[str, asyncio.Task] = {}  # sequence_id -> Task
 current_audio_data: Dict[str, float] = {  # Current audio levels from clients
     'bass': 0.0,
     'mid': 0.0,
@@ -115,8 +118,8 @@ async def broadcast_update(data: dict):
 
 # Daten laden/speichern
 def load_data():
-    """Lädt Geräte, Szenen, Gruppen, Effekte und Fixtures"""
-    global devices, scenes, groups, effects, fixtures
+    """Lädt Geräte, Szenen, Gruppen, Effekte, Sequences und Fixtures"""
+    global devices, scenes, groups, effects, sequences, fixtures
 
     if CONFIG_FILE.exists():
         with open(CONFIG_FILE, 'r') as f:
@@ -133,6 +136,10 @@ def load_data():
     if EFFECTS_FILE.exists():
         with open(EFFECTS_FILE, 'r') as f:
             effects = json.load(f)
+
+    if SEQUENCES_FILE.exists():
+        with open(SEQUENCES_FILE, 'r') as f:
+            sequences = json.load(f)
 
     # Load fixture library
     fixtures_file = BASE_DIR / "backend" / "fixtures.json"
@@ -164,6 +171,12 @@ def save_effects():
     """Speichert Effekte"""
     with open(EFFECTS_FILE, 'w') as f:
         json.dump(effects, f, indent=2)
+
+
+def save_sequences():
+    """Speichert Sequences"""
+    with open(SEQUENCES_FILE, 'w') as f:
+        json.dump(sequences, f, indent=2)
 
 
 # DMX Senden
