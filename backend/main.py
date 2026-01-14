@@ -3,21 +3,55 @@ DMX Web Controller - FastAPI Backend
 Echtzeit-Steuerung über WebSocket
 """
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel, Field, validator
 import json
 import asyncio
 from pathlib import Path
-from typing import List, Dict
+from typing import List, Dict, Optional
 import socket
 import struct
 from threading import Thread
 import time
 import os
+import logging
+import shutil
+from datetime import datetime
+import ipaddress
 
 app = FastAPI(title="DMX Web Controller")
+
+# Logging Configuration
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler('dmx_controller.log'),
+        logging.StreamHandler()
+    ]
+)
+logger = logging.getLogger(__name__)
+
+# System Limits & Configuration
+class Config:
+    MAX_ACTIVE_EFFECTS = 20
+    MAX_ACTIVE_SEQUENCES = 5
+    MAX_DEVICES = 100
+    MAX_SCENES = 200
+    MAX_GROUPS = 50
+    MAX_SEQUENCE_STEPS = 100
+    MAX_NAME_LENGTH = 100
+    BACKUP_RETENTION_DAYS = 7
+    AUTO_SAVE_INTERVAL = 30  # seconds
+    DMX_CHANNEL_MIN = 1
+    DMX_CHANNEL_MAX = 512
+    EFFECT_TIMEOUT = 3600  # 1 hour max runtime
+    SEQUENCE_TIMEOUT = 7200  # 2 hours max runtime
+
+config = Config()
 
 # Determine base path for files
 BASE_DIR = Path(__file__).parent.parent
@@ -37,6 +71,8 @@ app.add_middleware(
 # Datenpfade
 DATA_DIR = Path("/data") if Path("/data").exists() else BASE_DIR / "data"
 DATA_DIR.mkdir(exist_ok=True)
+BACKUP_DIR = DATA_DIR / "backups"
+BACKUP_DIR.mkdir(exist_ok=True)
 CONFIG_FILE = DATA_DIR / "dmx_config.json"
 SCENES_FILE = DATA_DIR / "dmx_scenes.json"
 GROUPS_FILE = DATA_DIR / "dmx_groups.json"
@@ -64,42 +100,205 @@ current_audio_data: Dict[str, float] = {  # Current audio levels from clients
     'overall': 0.0,
     'peak': 0
 }
+# DMX Performance Optimization - Channel Cache per device
+dmx_channel_cache: Dict[str, List[int]] = {}  # device_id -> last sent channel values
+last_save_time = time.time()  # For auto-save debouncing
 
 
 class ArtNetController:
-    """Art-Net DMX Controller"""
-    
+    """Art-Net DMX Controller with error handling and reconnection"""
+
     ARTNET_PORT = 6454
     ARTNET_HEADER = b'Art-Net\x00'
     OPCODE_DMX = 0x5000
     PROTOCOL_VERSION = 14
-    
+
     def __init__(self):
-        self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
-    
-    def send_dmx(self, ip, universe, channels):
-        """Sendet DMX via Art-Net"""
-        packet = bytearray(530)
-        packet[0:8] = self.ARTNET_HEADER
-        packet[8:10] = struct.pack('<H', self.OPCODE_DMX)
-        packet[10:12] = struct.pack('>H', self.PROTOCOL_VERSION)
-        packet[12] = 0
-        packet[13] = 0
-        packet[14:16] = struct.pack('<H', universe)
-        packet[16:18] = struct.pack('>H', len(channels))
-        
-        for i, value in enumerate(channels):
-            if i < 512:
-                packet[18 + i] = int(value)
-        
+        self.sock = None
+        self.error_count = 0
+        self.last_error_time = 0
+        self._init_socket()
+
+    def _init_socket(self):
+        """Initialize or reinitialize socket"""
         try:
-            self.sock.sendto(packet, (ip, self.ARTNET_PORT))
+            if self.sock:
+                self.sock.close()
+            self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+            self.sock.settimeout(1.0)  # 1 second timeout
+            logger.info("Art-Net socket initialized")
         except Exception as e:
-            print(f"DMX Send Error: {e}")
+            logger.error(f"Failed to initialize Art-Net socket: {e}")
+            raise
+
+    def send_dmx(self, ip: str, universe: int, channels: List[int]) -> bool:
+        """Sendet DMX via Art-Net with error handling"""
+        try:
+            # Validate inputs
+            if not channels or len(channels) > 512:
+                logger.warning(f"Invalid channel count: {len(channels)}")
+                return False
+
+            # Build packet
+            packet = bytearray(530)
+            packet[0:8] = self.ARTNET_HEADER
+            packet[8:10] = struct.pack('<H', self.OPCODE_DMX)
+            packet[10:12] = struct.pack('>H', self.PROTOCOL_VERSION)
+            packet[12] = 0
+            packet[13] = 0
+            packet[14:16] = struct.pack('<H', universe)
+            packet[16:18] = struct.pack('>H', len(channels))
+
+            for i, value in enumerate(channels):
+                if i < 512:
+                    packet[18 + i] = max(0, min(255, int(value)))  # Clamp to 0-255
+
+            # Send packet
+            self.sock.sendto(packet, (ip, self.ARTNET_PORT))
+
+            # Reset error count on success
+            if self.error_count > 0:
+                self.error_count = 0
+                logger.info(f"Art-Net communication recovered for {ip}")
+
+            return True
+
+        except socket.timeout:
+            logger.warning(f"DMX send timeout to {ip}")
+            return False
+        except socket.error as e:
+            self.error_count += 1
+            current_time = time.time()
+
+            # Log only if it's a new error or 10 seconds passed
+            if current_time - self.last_error_time > 10:
+                logger.error(f"DMX socket error to {ip}: {e} (count: {self.error_count})")
+                self.last_error_time = current_time
+
+            # Try to reinitialize socket after 5 errors
+            if self.error_count >= 5:
+                logger.warning("Attempting to reinitialize Art-Net socket")
+                try:
+                    self._init_socket()
+                    self.error_count = 0
+                except Exception as reinit_error:
+                    logger.error(f"Socket reinit failed: {reinit_error}")
+
+            return False
+        except Exception as e:
+            logger.error(f"Unexpected DMX send error to {ip}: {e}", exc_info=True)
+            return False
 
 
 controller = ArtNetController()
+
+
+# Pydantic Models for Input Validation
+class DeviceCreate(BaseModel):
+    name: str = Field(..., max_length=config.MAX_NAME_LENGTH, min_length=1)
+    ip: str
+    universe: int = Field(ge=0, le=15)
+    start_channel: int = Field(ge=config.DMX_CHANNEL_MIN, le=config.DMX_CHANNEL_MAX)
+    channel_count: int = Field(ge=1, le=512)
+    device_type: str
+    fixture_id: Optional[str] = None
+    channel_layout: Optional[Dict] = None
+
+    @validator('ip')
+    def validate_ip(cls, v):
+        try:
+            ipaddress.ip_address(v)
+            return v
+        except ValueError:
+            raise ValueError('Invalid IP address')
+
+    @validator('name')
+    def validate_name(cls, v):
+        if not v.strip():
+            raise ValueError('Name cannot be empty')
+        return v.strip()
+
+
+class SceneCreate(BaseModel):
+    name: str = Field(..., max_length=config.MAX_NAME_LENGTH, min_length=1)
+    color: str = Field(default="blue")
+    device_values: Dict[str, List[int]]
+
+
+class GroupCreate(BaseModel):
+    name: str = Field(..., max_length=config.MAX_NAME_LENGTH, min_length=1)
+    device_ids: List[str] = Field(..., min_items=1)
+
+
+class EffectCreate(BaseModel):
+    name: str = Field(..., max_length=config.MAX_NAME_LENGTH, min_length=1)
+    type: str
+    target_ids: List[str] = Field(..., min_items=1)
+    params: Dict = Field(default_factory=dict)
+    is_group: bool = False
+
+
+class SequenceCreate(BaseModel):
+    name: str = Field(..., max_length=config.MAX_NAME_LENGTH, min_length=1)
+    loop: bool = False
+    steps: List[Dict] = Field(..., max_items=config.MAX_SEQUENCE_STEPS)
+
+
+# Backup & Data Persistence Functions
+def create_backup(file_path: Path) -> bool:
+    """Creates a backup of a data file"""
+    try:
+        if not file_path.exists():
+            return False
+
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        backup_name = f"{file_path.stem}_{timestamp}.json"
+        backup_path = BACKUP_DIR / backup_name
+
+        shutil.copy2(file_path, backup_path)
+        logger.info(f"Backup created: {backup_name}")
+
+        # Clean old backups
+        cleanup_old_backups(file_path.stem)
+        return True
+    except Exception as e:
+        logger.error(f"Backup creation failed for {file_path}: {e}")
+        return False
+
+
+def cleanup_old_backups(file_prefix: str):
+    """Removes backups older than retention period"""
+    try:
+        retention_seconds = config.BACKUP_RETENTION_DAYS * 24 * 3600
+        current_time = time.time()
+
+        for backup_file in BACKUP_DIR.glob(f"{file_prefix}_*.json"):
+            file_age = current_time - backup_file.stat().st_mtime
+            if file_age > retention_seconds:
+                backup_file.unlink()
+                logger.info(f"Deleted old backup: {backup_file.name}")
+    except Exception as e:
+        logger.error(f"Backup cleanup failed: {e}")
+
+
+def atomic_write(file_path: Path, data: any):
+    """Atomic file write with backup"""
+    try:
+        # Create backup before writing
+        create_backup(file_path)
+
+        # Write to temporary file first
+        temp_path = file_path.with_suffix('.tmp')
+        with open(temp_path, 'w') as f:
+            json.dump(data, f, indent=2)
+
+        # Atomic rename
+        temp_path.replace(file_path)
+        return True
+    except Exception as e:
+        logger.error(f"Atomic write failed for {file_path}: {e}")
+        return False
 
 
 # WebSocket-Broadcast
@@ -118,77 +317,149 @@ async def broadcast_update(data: dict):
 
 # Daten laden/speichern
 def load_data():
-    """Lädt Geräte, Szenen, Gruppen, Effekte, Sequences und Fixtures"""
+    """Lädt Geräte, Szenen, Gruppen, Effekte, Sequences und Fixtures mit Error Handling"""
     global devices, scenes, groups, effects, sequences, fixtures
 
-    if CONFIG_FILE.exists():
-        with open(CONFIG_FILE, 'r') as f:
-            devices = json.load(f)
+    def safe_load(file_path: Path, data_type: str) -> list:
+        """Safely load JSON file with error handling"""
+        try:
+            if file_path.exists():
+                with open(file_path, 'r') as f:
+                    data = json.load(f)
+                    logger.info(f"Loaded {len(data)} {data_type}")
+                    return data
+        except json.JSONDecodeError as e:
+            logger.error(f"JSON decode error in {file_path}: {e}")
+            # Try to restore from backup
+            backups = sorted(BACKUP_DIR.glob(f"{file_path.stem}_*.json"), reverse=True)
+            if backups:
+                logger.info(f"Attempting to restore from backup: {backups[0]}")
+                try:
+                    with open(backups[0], 'r') as f:
+                        data = json.load(f)
+                        logger.info(f"Successfully restored {data_type} from backup")
+                        return data
+                except Exception as backup_error:
+                    logger.error(f"Backup restore failed: {backup_error}")
+        except Exception as e:
+            logger.error(f"Error loading {file_path}: {e}")
 
-    if SCENES_FILE.exists():
-        with open(SCENES_FILE, 'r') as f:
-            scenes = json.load(f)
+        return []
 
-    if GROUPS_FILE.exists():
-        with open(GROUPS_FILE, 'r') as f:
-            groups = json.load(f)
-
-    if EFFECTS_FILE.exists():
-        with open(EFFECTS_FILE, 'r') as f:
-            effects = json.load(f)
-
-    if SEQUENCES_FILE.exists():
-        with open(SEQUENCES_FILE, 'r') as f:
-            sequences = json.load(f)
+    devices = safe_load(CONFIG_FILE, "devices")
+    scenes = safe_load(SCENES_FILE, "scenes")
+    groups = safe_load(GROUPS_FILE, "groups")
+    effects = safe_load(EFFECTS_FILE, "effects")
+    sequences = safe_load(SEQUENCES_FILE, "sequences")
 
     # Load fixture library
     fixtures_file = BASE_DIR / "backend" / "fixtures.json"
-    if fixtures_file.exists():
-        with open(fixtures_file, 'r') as f:
-            fixture_data = json.load(f)
-            fixtures = fixture_data.get('fixtures', [])
+    try:
+        if fixtures_file.exists():
+            with open(fixtures_file, 'r') as f:
+                fixture_data = json.load(f)
+                fixtures = fixture_data.get('fixtures', [])
+                logger.info(f"Loaded {len(fixtures)} fixtures from library")
+    except Exception as e:
+        logger.error(f"Error loading fixture library: {e}")
+        fixtures = []
 
 
 def save_devices():
-    """Speichert Geräte"""
-    with open(CONFIG_FILE, 'w') as f:
-        json.dump(devices, f, indent=2)
+    """Speichert Geräte mit atomic write und backup"""
+    global last_save_time
+    try:
+        success = atomic_write(CONFIG_FILE, devices)
+        if success:
+            last_save_time = time.time()
+            logger.debug("Devices saved successfully")
+        return success
+    except Exception as e:
+        logger.error(f"Failed to save devices: {e}")
+        return False
 
 
 def save_scenes():
-    """Speichert Szenen"""
-    with open(SCENES_FILE, 'w') as f:
-        json.dump(scenes, f, indent=2)
+    """Speichert Szenen mit atomic write und backup"""
+    try:
+        success = atomic_write(SCENES_FILE, scenes)
+        if success:
+            logger.debug("Scenes saved successfully")
+        return success
+    except Exception as e:
+        logger.error(f"Failed to save scenes: {e}")
+        return False
 
 
 def save_groups():
-    """Speichert Gruppen"""
-    with open(GROUPS_FILE, 'w') as f:
-        json.dump(groups, f, indent=2)
+    """Speichert Gruppen mit atomic write und backup"""
+    try:
+        success = atomic_write(GROUPS_FILE, groups)
+        if success:
+            logger.debug("Groups saved successfully")
+        return success
+    except Exception as e:
+        logger.error(f"Failed to save groups: {e}")
+        return False
 
 
 def save_effects():
-    """Speichert Effekte"""
-    with open(EFFECTS_FILE, 'w') as f:
-        json.dump(effects, f, indent=2)
+    """Speichert Effekte mit atomic write und backup"""
+    try:
+        success = atomic_write(EFFECTS_FILE, effects)
+        if success:
+            logger.debug("Effects saved successfully")
+        return success
+    except Exception as e:
+        logger.error(f"Failed to save effects: {e}")
+        return False
 
 
 def save_sequences():
-    """Speichert Sequences"""
-    with open(SEQUENCES_FILE, 'w') as f:
-        json.dump(sequences, f, indent=2)
+    """Speichert Sequences mit atomic write und backup"""
+    try:
+        success = atomic_write(SEQUENCES_FILE, sequences)
+        if success:
+            logger.debug("Sequences saved successfully")
+        return success
+    except Exception as e:
+        logger.error(f"Failed to save sequences: {e}")
+        return False
 
 
-# DMX Senden
-def send_device_dmx(device):
-    """Sendet DMX für ein Gerät"""
-    channels = [0] * 512
-    for i, val in enumerate(device['values']):
-        ch = device['start_channel'] - 1 + i
-        if ch < 512:
-            channels[ch] = int(val)
+# DMX Senden mit Performance-Optimierung
+def send_device_dmx(device) -> bool:
+    """Sendet DMX für ein Gerät mit Channel-Caching"""
+    try:
+        device_id = device.get('id')
+        if not device_id:
+            logger.warning("Device without ID, cannot cache")
+            return False
 
-    controller.send_dmx(device['ip'], device['universe'], channels)
+        channels = [0] * 512
+        for i, val in enumerate(device.get('values', [])):
+            ch = device['start_channel'] - 1 + i
+            if 0 <= ch < 512:
+                channels[ch] = max(0, min(255, int(val)))  # Clamp values
+
+        # Check cache - only send if values changed
+        if device_id in dmx_channel_cache:
+            if dmx_channel_cache[device_id] == channels:
+                logger.debug(f"DMX cache hit for {device.get('name')}, skipping send")
+                return True  # Values unchanged, skip send
+
+        # Send DMX
+        success = controller.send_dmx(device['ip'], device['universe'], channels)
+
+        # Update cache on successful send
+        if success:
+            dmx_channel_cache[device_id] = channels.copy()
+
+        return success
+
+    except Exception as e:
+        logger.error(f"Error sending DMX for device {device.get('name')}: {e}")
+        return False
 
 
 # Gruppen-Hilfsfunktionen
@@ -641,14 +912,55 @@ class EffectEngine:
 effect_engine = EffectEngine()
 
 
+# Resource Management & Cleanup
+async def cleanup_task(task: asyncio.Task, task_dict: Dict, task_id: str, task_type: str):
+    """Cleans up task after completion or cancellation"""
+    try:
+        await task
+    except asyncio.CancelledError:
+        logger.info(f"{task_type} {task_id} cancelled")
+    except Exception as e:
+        logger.error(f"{task_type} {task_id} error: {e}", exc_info=True)
+    finally:
+        if task_id in task_dict:
+            del task_dict[task_id]
+            logger.debug(f"{task_type} {task_id} cleaned up")
+
+
+async def enforce_resource_limits():
+    """Enforces resource limits on active effects and sequences"""
+    global active_effects, active_sequences
+
+    # Check effect limits
+    if len(active_effects) >= config.MAX_ACTIVE_EFFECTS:
+        logger.warning(f"Effect limit reached ({config.MAX_ACTIVE_EFFECTS}), stopping oldest")
+        # Stop oldest effect
+        if active_effects:
+            oldest_id = next(iter(active_effects))
+            active_effects[oldest_id].cancel()
+            logger.info(f"Stopped oldest effect: {oldest_id}")
+
+    # Check sequence limits
+    if len(active_sequences) >= config.MAX_ACTIVE_SEQUENCES:
+        logger.warning(f"Sequence limit reached ({config.MAX_ACTIVE_SEQUENCES}), stopping oldest")
+        if active_sequences:
+            oldest_id = next(iter(active_sequences))
+            active_sequences[oldest_id].cancel()
+            logger.info(f"Stopped oldest sequence: {oldest_id}")
+
+
 async def start_effect(effect_id: str, effect_type: str, target_ids: List[str],
                        params: dict, is_group: bool = False):
-    """Startet einen Effekt"""
+    """Startet einen Effekt mit Resource Management"""
     global active_effects
+
+    # Enforce resource limits
+    await enforce_resource_limits()
 
     # Stoppe existierenden Effekt
     if effect_id in active_effects:
         active_effects[effect_id].cancel()
+        await asyncio.sleep(0.1)  # Give time to cleanup
 
     # Starte neuen Effekt
     try:
@@ -729,13 +1041,28 @@ async def start_effect(effect_id: str, effect_type: str, target_ids: List[str],
                 )
             )
         else:
+            logger.warning(f"Unknown effect type: {effect_type}")
             return False
 
-        active_effects[effect_id] = task
+        # Wrap task with timeout
+        async def effect_with_timeout():
+            try:
+                await asyncio.wait_for(task, timeout=config.EFFECT_TIMEOUT)
+            except asyncio.TimeoutError:
+                logger.warning(f"Effect {effect_id} timed out after {config.EFFECT_TIMEOUT}s")
+                task.cancel()
+
+        timeout_task = asyncio.create_task(effect_with_timeout())
+        active_effects[effect_id] = timeout_task
+
+        # Setup cleanup
+        asyncio.create_task(cleanup_task(timeout_task, active_effects, effect_id, "Effect"))
+
+        logger.info(f"Started effect {effect_id} (type: {effect_type})")
         return True
 
     except Exception as e:
-        print(f"Error starting effect: {e}")
+        logger.error(f"Error starting effect {effect_id}: {e}", exc_info=True)
         return False
 
 
@@ -909,19 +1236,40 @@ async def get_devices():
 
 
 @app.post("/api/devices")
-async def add_device(device: dict):
-    """Fügt neues Gerät hinzu"""
-    device['id'] = f"device_{int(time.time() * 1000)}"
-    device['values'] = [0] * device['channel_count']
-    devices.append(device)
-    save_devices()
-    
-    await broadcast_update({
-        'type': 'devices_updated',
-        'devices': devices
-    })
-    
-    return {"success": True, "device": device}
+async def add_device(device_data: DeviceCreate):
+    """Fügt neues Gerät hinzu mit Validation"""
+    try:
+        # Check device limit
+        if len(devices) >= config.MAX_DEVICES:
+            raise HTTPException(status_code=400, detail=f"Maximum device limit ({config.MAX_DEVICES}) reached")
+
+        # Check for duplicate device on same IP/universe/channel
+        for existing in devices:
+            if (existing['ip'] == device_data.ip and
+                existing['universe'] == device_data.universe and
+                existing['start_channel'] == device_data.start_channel):
+                raise HTTPException(status_code=400, detail="Device with same IP, universe, and channel already exists")
+
+        device = device_data.dict()
+        device['id'] = f"device_{int(time.time() * 1000)}"
+        device['values'] = [0] * device['channel_count']
+
+        devices.append(device)
+        save_devices()
+
+        await broadcast_update({
+            'type': 'devices_updated',
+            'devices': devices
+        })
+
+        logger.info(f"Added device: {device['name']} ({device['id']})")
+        return {"success": True, "device": device}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error adding device: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.delete("/api/devices/{device_id}")
@@ -967,24 +1315,38 @@ async def get_scenes():
 
 
 @app.post("/api/scenes")
-async def add_scene(scene: dict):
-    """Erstellt neue Szene"""
-    scene['id'] = f"scene_{int(time.time() * 1000)}"
-    
-    # Erfasse aktuelle Werte
-    scene['device_values'] = {}
-    for device in devices:
-        scene['device_values'][device['name']] = device['values'].copy()
-    
-    scenes.append(scene)
-    save_scenes()
-    
-    await broadcast_update({
-        'type': 'scenes_updated',
-        'scenes': scenes
-    })
-    
-    return {"success": True, "scene": scene}
+async def add_scene(scene_data: SceneCreate):
+    """Erstellt neue Szene mit Validation"""
+    try:
+        # Check scene limit
+        if len(scenes) >= config.MAX_SCENES:
+            raise HTTPException(status_code=400, detail=f"Maximum scene limit ({config.MAX_SCENES}) reached")
+
+        scene = scene_data.dict()
+        scene['id'] = f"scene_{int(time.time() * 1000)}"
+
+        # If device_values not provided, capture current values
+        if not scene.get('device_values'):
+            scene['device_values'] = {}
+            for device in devices:
+                scene['device_values'][device['name']] = device['values'].copy()
+
+        scenes.append(scene)
+        save_scenes()
+
+        await broadcast_update({
+            'type': 'scenes_updated',
+            'scenes': scenes
+        })
+
+        logger.info(f"Added scene: {scene['name']} ({scene['id']})")
+        return {"success": True, "scene": scene}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error adding scene: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.delete("/api/scenes/{scene_id}")
@@ -1104,18 +1466,25 @@ async def get_effects():
 
 
 @app.post("/api/effects")
-async def create_effect(effect: dict):
-    """Erstellt und speichert Effekt"""
-    effect['id'] = f"effect_{int(time.time() * 1000)}"
-    effects.append(effect)
-    save_effects()
+async def create_effect(effect_data: EffectCreate):
+    """Erstellt und speichert Effekt mit Validation"""
+    try:
+        effect = effect_data.dict()
+        effect['id'] = f"effect_{int(time.time() * 1000)}"
+        effects.append(effect)
+        save_effects()
 
-    await broadcast_update({
-        'type': 'effects_updated',
-        'effects': effects
-    })
+        await broadcast_update({
+            'type': 'effects_updated',
+            'effects': effects
+        })
 
-    return {"success": True, "effect": effect}
+        logger.info(f"Created effect: {effect['name']} ({effect['id']})")
+        return {"success": True, "effect": effect}
+
+    except Exception as e:
+        logger.error(f"Error creating effect: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.post("/api/effects/{effect_id}/start")
@@ -1176,18 +1545,25 @@ async def get_sequences():
 
 
 @app.post("/api/sequences")
-async def create_sequence(sequence: dict):
-    """Erstellt eine neue Sequence"""
-    sequence['id'] = f"seq_{int(time.time() * 1000)}"
-    sequences.append(sequence)
-    save_sequences()
+async def create_sequence(sequence_data: SequenceCreate):
+    """Erstellt eine neue Sequence mit Validation"""
+    try:
+        sequence = sequence_data.dict()
+        sequence['id'] = f"seq_{int(time.time() * 1000)}"
+        sequences.append(sequence)
+        save_sequences()
 
-    await broadcast_update({
-        'type': 'sequences_updated',
-        'sequences': sequences
-    })
+        await broadcast_update({
+            'type': 'sequences_updated',
+            'sequences': sequences
+        })
 
-    return {"success": True, "sequence": sequence}
+        logger.info(f"Created sequence: {sequence['name']} ({sequence['id']})")
+        return {"success": True, "sequence": sequence}
+
+    except Exception as e:
+        logger.error(f"Error creating sequence: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.put("/api/sequences/{sequence_id}")
