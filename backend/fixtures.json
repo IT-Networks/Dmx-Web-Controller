@@ -231,6 +231,52 @@
         {"index": 2, "name": "Green/Blue", "type": "color"},
         {"index": 3, "name": "Strobe", "type": "shutter"}
       ]
+    },
+    {
+      "id": "eurolite_pll_384_cw_ww",
+      "manufacturer": "Eurolite",
+      "model": "PLL-384 CW/WW",
+      "category": "panel",
+      "channels": 5,
+      "channel_layout": [
+        {"index": 0, "name": "Master Dimmer", "type": "intensity"},
+        {"index": 1, "name": "Cold White", "type": "white"},
+        {"index": 2, "name": "Warm White", "type": "white"},
+        {"index": 3, "name": "Strobe", "type": "shutter"},
+        {"index": 4, "name": "Program/Mode", "type": "program"}
+      ]
+    },
+    {
+      "id": "stairville_mini_stage_par_cw_ww_a",
+      "manufacturer": "Stairville",
+      "model": "Mini Stage PAR CW/WW/A",
+      "category": "par",
+      "channels": 4,
+      "channel_layout": [
+        {"index": 0, "name": "Master Dimmer", "type": "intensity"},
+        {"index": 1, "name": "Cold White", "type": "white"},
+        {"index": 2, "name": "Warm White", "type": "white"},
+        {"index": 3, "name": "Amber", "type": "amber"}
+      ]
+    },
+    {
+      "id": "stairville_wild_wash_132_led_cw",
+      "manufacturer": "Stairville",
+      "model": "Wild Wash 132 LED CW",
+      "category": "wash",
+      "channels": 10,
+      "channel_layout": [
+        {"index": 0, "name": "Pan", "type": "pan"},
+        {"index": 1, "name": "Pan Fine", "type": "pan_fine"},
+        {"index": 2, "name": "Tilt", "type": "tilt"},
+        {"index": 3, "name": "Tilt Fine", "type": "tilt_fine"},
+        {"index": 4, "name": "Pan/Tilt Speed", "type": "speed"},
+        {"index": 5, "name": "Dimmer", "type": "intensity"},
+        {"index": 6, "name": "Strobe", "type": "shutter"},
+        {"index": 7, "name": "Auto Program", "type": "program"},
+        {"index": 8, "name": "Auto Speed", "type": "speed"},
+        {"index": 9, "name": "Control/Reset", "type": "control"}
+      ]
     }
   ]
 }
