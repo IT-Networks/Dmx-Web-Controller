@@ -1,0 +1,50 @@
+version: '3.8'
+
+services:
+  dmx-controller:
+    build: .
+    container_name: dmx-web-controller
+    restart: unless-stopped
+    
+    ports:
+      - "8000:8000"  # Web Interface Port
+    
+    volumes:
+      - ./data:/data  # Persistente Daten (Konfigurationen)
+    
+    environment:
+      - TZ=Europe/Berlin
+      - PYTHONUNBUFFERED=1
+    
+    networks:
+      - dmx-network
+    
+    # Netzwerk-Modus für Art-Net (host network für Broadcast)
+    network_mode: bridge
+    
+    # Capabilities für Netzwerk
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+    
+    labels:
+      - "com.github.dmx-controller.version=1.0"
+      - "com.github.dmx-controller.description=DMX Lighting Web Controller"
+
+networks:
+  dmx-network:
+    driver: bridge
+
+# Optional: Für Unraid Template
+# Unraid Community Applications Template:
+# 
+# Name: DMX Web Controller
+# Repository: <your-repo>/dmx-web-controller
+# WebUI: http://[IP]:[PORT:8000]
+# Icon: https://raw.githubusercontent.com/<your-repo>/dmx-web-controller/main/icon.png
+# 
+# Config:
+# - Port: 8000 (Web Interface)
+# - Path: /data (App Data)
+# 
+# Network: bridge (für Art-Net Broadcast)
