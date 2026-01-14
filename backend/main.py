@@ -21,6 +21,7 @@ import logging
 import shutil
 from datetime import datetime
 import ipaddress
+import math
 
 app = FastAPI(title="DMX Web Controller")
 
@@ -909,6 +910,176 @@ class EffectEngine:
             await asyncio.sleep(speed)
 
 
+    @staticmethod
+    async def custom(target_ids: List[str], keyframes: List[Dict], duration: float = 10.0,
+                     mode: str = 'spot', is_group: bool = False):
+        """
+        Custom Keyframe-basierter Effekt für Spots und Strips
+
+        Args:
+            target_ids: Liste der Ziel-Geräte/Gruppen
+            keyframes: Liste von Keyframes mit {time, values, easing}
+            duration: Gesamtdauer des Effekts in Sekunden
+            mode: 'spot' für einzelne Lichter, 'strip' für LED-Streifen
+            is_group: Ob target_ids Gruppen sind
+        """
+        target_devices = []
+        if is_group:
+            for group_id in target_ids:
+                target_devices.extend(get_group_devices(group_id))
+        else:
+            target_devices = [d for d in devices if d['id'] in target_ids]
+
+        if not keyframes or len(keyframes) < 2:
+            logger.warning("Custom effect needs at least 2 keyframes")
+            return
+
+        # Sort keyframes by time
+        sorted_keyframes = sorted(keyframes, key=lambda k: k.get('time', 0))
+
+        start_time = time.time()
+        fps = 30  # 30 frames per second
+        frame_duration = 1.0 / fps
+
+        while True:
+            elapsed = time.time() - start_time
+            progress = (elapsed % duration) / duration  # 0.0 to 1.0
+            current_time = progress * 100  # Convert to 0-100 percentage
+
+            # Find surrounding keyframes
+            prev_kf = sorted_keyframes[0]
+            next_kf = sorted_keyframes[-1]
+
+            for i in range(len(sorted_keyframes) - 1):
+                if sorted_keyframes[i]['time'] <= current_time <= sorted_keyframes[i + 1]['time']:
+                    prev_kf = sorted_keyframes[i]
+                    next_kf = sorted_keyframes[i + 1]
+                    break
+
+            # Interpolate between keyframes
+            if prev_kf['time'] == next_kf['time']:
+                factor = 0
+            else:
+                factor = (current_time - prev_kf['time']) / (next_kf['time'] - prev_kf['time'])
+
+            # Apply easing
+            easing = next_kf.get('easing', 'linear')
+            factor = EffectEngine._apply_easing(factor, easing)
+
+            if mode == 'strip':
+                # Strip mode: Interpolate pixel-by-pixel for LED strips
+                await EffectEngine._apply_strip_effect(target_devices, prev_kf, next_kf, factor)
+            else:
+                # Spot mode: Interpolate all channels uniformly
+                await EffectEngine._apply_spot_effect(target_devices, prev_kf, next_kf, factor)
+
+            await asyncio.sleep(frame_duration)
+
+    @staticmethod
+    def _apply_easing(t: float, easing: str) -> float:
+        """Apply easing function to interpolation factor"""
+        if easing == 'ease-in':
+            return t * t
+        elif easing == 'ease-out':
+            return 1 - (1 - t) * (1 - t)
+        elif easing == 'ease-in-out':
+            return 3 * t * t - 2 * t * t * t
+        else:  # linear
+            return t
+
+    @staticmethod
+    async def _apply_spot_effect(devices_list: List, prev_kf: Dict, next_kf: Dict, factor: float):
+        """Apply interpolated values to spot devices (uniform color)"""
+        prev_values = prev_kf.get('values', {})
+        next_values = next_kf.get('values', {})
+
+        for device in devices_list:
+            device_id = device.get('id')
+
+            # Get RGB values from keyframes
+            prev_rgb = prev_values.get(device_id, prev_values.get('default', [255, 255, 255]))
+            next_rgb = next_values.get(device_id, next_values.get('default', [255, 255, 255]))
+
+            # Interpolate
+            interpolated = []
+            for i in range(min(len(prev_rgb), len(next_rgb))):
+                value = int(prev_rgb[i] + (next_rgb[i] - prev_rgb[i]) * factor)
+                interpolated.append(max(0, min(255, value)))
+
+            # Apply to device
+            for i in range(len(device['values'])):
+                if i < len(interpolated):
+                    device['values'][i] = interpolated[i]
+
+            send_device_dmx(device)
+
+    @staticmethod
+    async def _apply_strip_effect(devices_list: List, prev_kf: Dict, next_kf: Dict, factor: float):
+        """Apply interpolated values to strip devices (pixel-by-pixel)"""
+        prev_pattern = prev_kf.get('pattern', {})
+        next_pattern = next_kf.get('pattern', {})
+        pattern_type = next_kf.get('pattern_type', 'solid')
+
+        for device in devices_list:
+            device_id = device.get('id')
+            num_channels = len(device['values'])
+
+            if pattern_type == 'wave':
+                # Create wave pattern
+                wavelength = next_pattern.get('wavelength', 10)
+                amplitude = next_pattern.get('amplitude', 255)
+                offset = factor * wavelength
+
+                for i in range(num_channels):
+                    wave_value = (math.sin((i + offset) * 2 * math.pi / wavelength) + 1) / 2
+                    device['values'][i] = int(wave_value * amplitude)
+
+            elif pattern_type == 'gradient':
+                # Create gradient across strip
+                start_color = prev_pattern.get('color', [255, 0, 0])
+                end_color = next_pattern.get('color', [0, 0, 255])
+
+                channels_per_pixel = 3  # Assume RGB
+                num_pixels = num_channels // channels_per_pixel
+
+                for pixel in range(num_pixels):
+                    pixel_factor = pixel / max(1, num_pixels - 1)
+                    for c in range(channels_per_pixel):
+                        value = int(start_color[c] + (end_color[c] - start_color[c]) * pixel_factor)
+                        channel_idx = pixel * channels_per_pixel + c
+                        if channel_idx < num_channels:
+                            device['values'][channel_idx] = max(0, min(255, value))
+
+            elif pattern_type == 'chase':
+                # Moving light chase across strip
+                position = factor * num_channels
+                chase_width = next_pattern.get('width', 3)
+
+                for i in range(num_channels):
+                    distance = abs(i - position)
+                    if distance < chase_width:
+                        brightness = int(255 * (1 - distance / chase_width))
+                        device['values'][i] = brightness
+                    else:
+                        device['values'][i] = 0
+
+            else:  # solid or default
+                # Uniform color interpolation
+                prev_color = prev_pattern.get('color', [255, 255, 255])
+                next_color = next_pattern.get('color', [255, 255, 255])
+
+                interpolated = []
+                for i in range(3):
+                    value = int(prev_color[i] + (next_color[i] - prev_color[i]) * factor)
+                    interpolated.append(max(0, min(255, value)))
+
+                # Apply to all pixels
+                for i in range(num_channels):
+                    device['values'][i] = interpolated[i % 3]
+
+            send_device_dmx(device)
+
+
 effect_engine = EffectEngine()
 
 
@@ -1037,6 +1208,16 @@ async def start_effect(effect_id: str, effect_type: str, target_ids: List[str],
                     target_ids,
                     speed=params.get('speed', 0.1),
                     density=params.get('density', 0.3),
+                    is_group=is_group
+                )
+            )
+        elif effect_type == 'custom':
+            task = asyncio.create_task(
+                effect_engine.custom(
+                    target_ids,
+                    keyframes=params.get('keyframes', []),
+                    duration=params.get('duration', 10.0),
+                    mode=params.get('mode', 'spot'),
                     is_group=is_group
                 )
             )

@@ -50,6 +50,15 @@ Eine moderne, browserbasierte Steuerungslösung für DMX-Lichtanlagen mit Art-Ne
 - **Matrix** 📊: 2D Grid Patterns (Wave, Circle, Checkerboard)
 - **Funkeln** ✨: Random Sparkle-Effekt mit konfigurierbarer Dichte
 
+**Visual Effect Designer:**
+- **Keyframe-basiert** 🎬: Erstelle eigene Effekte mit visueller Timeline
+- **Dual-Mode**: Separate Modi für Spots (uniforme Farben) und LED Strips (Pixel-Muster)
+- **Canvas Timeline**: Interaktive Timeline mit Drag & Drop Keyframes
+- **Easing Functions**: Linear, Ease-In, Ease-Out, Ease-In-Out für professionelle Übergänge
+- **Strip Patterns**: Solid, Gradient, Wave, Chase mit individuellen Parametern
+- **Vorlagen**: Fade, Pulse, Color Cycle, Strobe als Startpunkt
+- **Live-Preview**: Echtzeit-Vorschau mit Scrubber-Animation
+
 **Features:**
 - **Echtzeit-Steuerung**: Start/Stop von Effekten während der Ausführung
 - **Gruppen & Geräte**: Effekte auf einzelne Geräte oder ganze Gruppen anwendbar
@@ -428,12 +437,12 @@ Beiträge sind willkommen! Hier sind einige Ideen:
 - [x] **Audio-Reaktivität**: Beat Detection & Sound-Reactive Effects
 - [x] **Stability**: Backups, Error Recovery, Input Validation
 - [x] **Performance**: DMX-Caching, Resource Management
+- [x] **Visual Effect Designer**: Keyframe-basierter Editor für eigene Effekte (Spots & LED Strips)
 
 ### 🚧 In Planung
 - [ ] **MIDI Integration**: Steuerung via MIDI-Controller
 - [ ] **Mobile App**: Native iOS/Android App (PWA)
 - [ ] **Backup/Restore**: Konfiguration exportieren/importieren
-- [ ] **Effect Designer**: Visueller Editor für eigene Effekte
 - [ ] **Multi-Universe UI**: Bessere Verwaltung mehrerer Universen
 - [ ] **Fixture Editor**: Eigene Fixture-Definitionen erstellen
 - [ ] **Cloud Sync**: Konfiguration über mehrere Instanzen synchronisieren

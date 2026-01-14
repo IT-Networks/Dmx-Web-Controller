@@ -183,6 +183,10 @@
                                 <span class="effect-icon">✨</span>
                                 <span>Glitzer</span>
                             </button>
+                            <button class="effect-template effect-template-custom" onclick="app.openVisualDesigner()">
+                                <span class="effect-icon">🎨</span>
+                                <span>Custom Designer</span>
+                            </button>
                         </div>
                     </div>
                 </div>
@@ -530,6 +534,190 @@
                     </div>
                     <span id="soundLevelText">0%</span>
                 </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal: Visual Effect Designer -->
+    <div class="modal modal-large" id="visualDesignerModal">
+        <div class="modal-backdrop" onclick="app.closeVisualDesigner()"></div>
+        <div class="modal-dialog modal-visual-designer">
+            <div class="modal-header">
+                <h2>🎨 Visual Effect Designer</h2>
+                <button class="modal-close" onclick="app.closeVisualDesigner()">×</button>
+            </div>
+            <div class="modal-body">
+                <!-- Effect Info -->
+                <div class="designer-info-section">
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label>Effekt-Name</label>
+                            <input type="text" id="customEffectName" placeholder="Mein Custom Effekt" class="input">
+                        </div>
+                        <div class="form-group">
+                            <label>Modus</label>
+                            <div class="button-group">
+                                <button class="btn-option active" data-mode="spot" onclick="app.setDesignerMode('spot')">
+                                    <span>💡 Spots</span>
+                                </button>
+                                <button class="btn-option" data-mode="strip" onclick="app.setDesignerMode('strip')">
+                                    <span>🌈 LED Strips</span>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label>Geräte auswählen</label>
+                            <select id="customEffectDevices" class="input" multiple size="4">
+                                <!-- Populated by JS -->
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label>Dauer (Sekunden)</label>
+                            <input type="number" id="customEffectDuration" value="10" min="1" max="60" step="0.5" class="input">
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Timeline -->
+                <div class="designer-timeline-section">
+                    <div class="timeline-header">
+                        <h3>Timeline</h3>
+                        <button class="btn btn-secondary btn-sm" onclick="app.addKeyframe()">
+                            <svg width="16" height="16" viewBox="0 0 16 16">
+                                <path d="M8 2 L8 14 M2 8 L14 8" stroke="currentColor" stroke-width="2"/>
+                            </svg>
+                            Keyframe hinzufügen
+                        </button>
+                    </div>
+                    <div class="timeline-container" id="designerTimeline">
+                        <canvas id="timelineCanvas" width="800" height="120"></canvas>
+                        <div class="timeline-scrubber" id="timelineScrubber"></div>
+                    </div>
+                    <div class="timeline-controls">
+                        <button class="btn btn-icon" onclick="app.playPreview()">
+                            <span id="playIcon">▶️</span>
+                        </button>
+                        <span id="timelineTime">0.0s</span>
+                    </div>
+                </div>
+
+                <!-- Keyframe Editor -->
+                <div class="designer-keyframe-section" id="keyframeEditor" style="display: none;">
+                    <h3>Keyframe Einstellungen</h3>
+                    <div id="keyframeEditorContent">
+                        <!-- Spot Mode -->
+                        <div id="spotKeyframeEditor" style="display: none;">
+                            <div class="form-group">
+                                <label>Position (0-100%)</label>
+                                <input type="range" id="kfPosition" min="0" max="100" value="0" class="input-range">
+                                <span id="kfPositionValue">0%</span>
+                            </div>
+                            <div class="form-group">
+                                <label>Farbe</label>
+                                <div class="color-picker-group">
+                                    <input type="color" id="kfColor" value="#ffffff" class="color-input">
+                                    <div class="rgb-inputs">
+                                        <input type="number" id="kfRed" min="0" max="255" value="255" placeholder="R" class="input input-sm">
+                                        <input type="number" id="kfGreen" min="0" max="255" value="255" placeholder="G" class="input input-sm">
+                                        <input type="number" id="kfBlue" min="0" max="255" value="255" placeholder="B" class="input input-sm">
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="form-group">
+                                <label>Easing</label>
+                                <select id="kfEasing" class="input">
+                                    <option value="linear">Linear</option>
+                                    <option value="ease-in">Ease In</option>
+                                    <option value="ease-out">Ease Out</option>
+                                    <option value="ease-in-out">Ease In-Out</option>
+                                </select>
+                            </div>
+                        </div>
+
+                        <!-- Strip Mode -->
+                        <div id="stripKeyframeEditor" style="display: none;">
+                            <div class="form-group">
+                                <label>Position (0-100%)</label>
+                                <input type="range" id="stripKfPosition" min="0" max="100" value="0" class="input-range">
+                                <span id="stripKfPositionValue">0%</span>
+                            </div>
+                            <div class="form-group">
+                                <label>Pattern-Typ</label>
+                                <select id="stripPattern" class="input" onchange="app.updateStripPattern()">
+                                    <option value="solid">Einfarbig</option>
+                                    <option value="gradient">Gradient</option>
+                                    <option value="wave">Welle</option>
+                                    <option value="chase">Lauflicht</option>
+                                </select>
+                            </div>
+                            <div id="stripPatternSettings">
+                                <!-- Solid -->
+                                <div id="solidSettings" class="pattern-settings">
+                                    <div class="form-group">
+                                        <label>Farbe</label>
+                                        <input type="color" id="stripColor" value="#ffffff" class="color-input">
+                                    </div>
+                                </div>
+                                <!-- Gradient -->
+                                <div id="gradientSettings" class="pattern-settings" style="display: none;">
+                                    <div class="form-row">
+                                        <div class="form-group">
+                                            <label>Start-Farbe</label>
+                                            <input type="color" id="gradientStart" value="#ff0000" class="color-input">
+                                        </div>
+                                        <div class="form-group">
+                                            <label>End-Farbe</label>
+                                            <input type="color" id="gradientEnd" value="#0000ff" class="color-input">
+                                        </div>
+                                    </div>
+                                </div>
+                                <!-- Wave -->
+                                <div id="waveSettings" class="pattern-settings" style="display: none;">
+                                    <div class="form-group">
+                                        <label>Wellenlänge</label>
+                                        <input type="range" id="waveLength" min="3" max="30" value="10" class="input-range">
+                                        <span id="waveLengthValue">10</span>
+                                    </div>
+                                    <div class="form-group">
+                                        <label>Amplitude</label>
+                                        <input type="range" id="waveAmplitude" min="0" max="255" value="255" class="input-range">
+                                        <span id="waveAmplitudeValue">255</span>
+                                    </div>
+                                </div>
+                                <!-- Chase -->
+                                <div id="chaseSettings" class="pattern-settings" style="display: none;">
+                                    <div class="form-group">
+                                        <label>Breite</label>
+                                        <input type="range" id="chaseWidth" min="1" max="10" value="3" class="input-range">
+                                        <span id="chaseWidthValue">3</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="keyframe-actions">
+                            <button class="btn btn-secondary" onclick="app.deleteCurrentKeyframe()">Keyframe löschen</button>
+                            <button class="btn btn-primary" onclick="app.saveCurrentKeyframe()">Übernehmen</button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Templates -->
+                <div class="designer-templates-section">
+                    <h3>Templates</h3>
+                    <div class="template-buttons">
+                        <button class="btn btn-secondary btn-sm" onclick="app.loadTemplate('fade')">Fade</button>
+                        <button class="btn btn-secondary btn-sm" onclick="app.loadTemplate('pulse')">Puls</button>
+                        <button class="btn btn-secondary btn-sm" onclick="app.loadTemplate('colorCycle')">Farbwechsel</button>
+                        <button class="btn btn-secondary btn-sm" onclick="app.loadTemplate('strobe')">Stroboskop</button>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="app.closeVisualDesigner()">Abbrechen</button>
+                <button class="btn btn-primary" onclick="app.saveCustomEffect()">Effekt erstellen</button>
             </div>
         </div>
     </div>
