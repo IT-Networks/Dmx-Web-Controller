@@ -1,0 +1,282 @@
+{
+  "fixtures": [
+    {
+      "id": "generic_dimmer",
+      "manufacturer": "Generic",
+      "model": "Dimmer 1CH",
+      "category": "dimmer",
+      "channels": 1,
+      "channel_layout": [
+        {"index": 0, "name": "Helligkeit", "type": "intensity"}
+      ]
+    },
+    {
+      "id": "generic_rgb",
+      "manufacturer": "Generic",
+      "model": "RGB 3CH",
+      "category": "rgb",
+      "channels": 3,
+      "channel_layout": [
+        {"index": 0, "name": "Rot", "type": "red"},
+        {"index": 1, "name": "Grün", "type": "green"},
+        {"index": 2, "name": "Blau", "type": "blue"}
+      ]
+    },
+    {
+      "id": "generic_rgbw",
+      "manufacturer": "Generic",
+      "model": "RGBW 4CH",
+      "category": "rgbw",
+      "channels": 4,
+      "channel_layout": [
+        {"index": 0, "name": "Rot", "type": "red"},
+        {"index": 1, "name": "Grün", "type": "green"},
+        {"index": 2, "name": "Blau", "type": "blue"},
+        {"index": 3, "name": "Weiß", "type": "white"}
+      ]
+    },
+    {
+      "id": "stairville_mh250",
+      "manufacturer": "Stairville",
+      "model": "MH-250 Moving Head",
+      "category": "moving_head",
+      "channels": 16,
+      "channel_layout": [
+        {"index": 0, "name": "Pan", "type": "pan"},
+        {"index": 1, "name": "Pan Fine", "type": "pan_fine"},
+        {"index": 2, "name": "Tilt", "type": "tilt"},
+        {"index": 3, "name": "Tilt Fine", "type": "tilt_fine"},
+        {"index": 4, "name": "Pan/Tilt Speed", "type": "speed"},
+        {"index": 5, "name": "Dimmer", "type": "intensity"},
+        {"index": 6, "name": "Shutter/Strobe", "type": "shutter"},
+        {"index": 7, "name": "Color", "type": "color"},
+        {"index": 8, "name": "Gobo", "type": "gobo"},
+        {"index": 9, "name": "Gobo Rotation", "type": "gobo_rotation"},
+        {"index": 10, "name": "Prism", "type": "prism"},
+        {"index": 11, "name": "Prism Rotation", "type": "prism_rotation"},
+        {"index": 12, "name": "Focus", "type": "focus"},
+        {"index": 13, "name": "Frost", "type": "frost"},
+        {"index": 14, "name": "Special", "type": "special"},
+        {"index": 15, "name": "Reset", "type": "control"}
+      ]
+    },
+    {
+      "id": "eurolite_led_bar_12",
+      "manufacturer": "Eurolite",
+      "model": "LED BAR-12 QCL",
+      "category": "led_bar",
+      "channels": 8,
+      "channel_layout": [
+        {"index": 0, "name": "Master Dimmer", "type": "intensity"},
+        {"index": 1, "name": "Rot", "type": "red"},
+        {"index": 2, "name": "Grün", "type": "green"},
+        {"index": 3, "name": "Blau", "type": "blue"},
+        {"index": 4, "name": "Weiß", "type": "white"},
+        {"index": 5, "name": "Strobe", "type": "shutter"},
+        {"index": 6, "name": "Program", "type": "program"},
+        {"index": 7, "name": "Program Speed", "type": "speed"}
+      ]
+    },
+    {
+      "id": "adj_par_64",
+      "manufacturer": "American DJ",
+      "model": "PAR 64 LED",
+      "category": "par",
+      "channels": 7,
+      "channel_layout": [
+        {"index": 0, "name": "Rot", "type": "red"},
+        {"index": 1, "name": "Grün", "type": "green"},
+        {"index": 2, "name": "Blau", "type": "blue"},
+        {"index": 3, "name": "Master Dimmer", "type": "intensity"},
+        {"index": 4, "name": "Strobe", "type": "shutter"},
+        {"index": 5, "name": "Color Macro", "type": "color"},
+        {"index": 6, "name": "Mode", "type": "control"}
+      ]
+    },
+    {
+      "id": "cameo_hydrabeam_600",
+      "manufacturer": "Cameo",
+      "model": "Hydrabeam 600 RGBW",
+      "category": "beam",
+      "channels": 22,
+      "channel_layout": [
+        {"index": 0, "name": "Pan", "type": "pan"},
+        {"index": 1, "name": "Pan Fine", "type": "pan_fine"},
+        {"index": 2, "name": "Tilt", "type": "tilt"},
+        {"index": 3, "name": "Tilt Fine", "type": "tilt_fine"},
+        {"index": 4, "name": "Pan/Tilt Speed", "type": "speed"},
+        {"index": 5, "name": "Master Dimmer", "type": "intensity"},
+        {"index": 6, "name": "Strobe", "type": "shutter"},
+        {"index": 7, "name": "Rot All", "type": "red"},
+        {"index": 8, "name": "Grün All", "type": "green"},
+        {"index": 9, "name": "Blau All", "type": "blue"},
+        {"index": 10, "name": "Weiß All", "type": "white"},
+        {"index": 11, "name": "Color Macro", "type": "color"},
+        {"index": 12, "name": "Rot 1", "type": "red"},
+        {"index": 13, "name": "Grün 1", "type": "green"},
+        {"index": 14, "name": "Blau 1", "type": "blue"},
+        {"index": 15, "name": "Weiß 1", "type": "white"},
+        {"index": 16, "name": "Rot 2", "type": "red"},
+        {"index": 17, "name": "Grün 2", "type": "green"},
+        {"index": 18, "name": "Blau 2", "type": "blue"},
+        {"index": 19, "name": "Weiß 2", "type": "white"},
+        {"index": 20, "name": "Settings", "type": "control"},
+        {"index": 21, "name": "Reset", "type": "control"}
+      ]
+    },
+    {
+      "id": "showtec_led_wash",
+      "manufacturer": "Showtec",
+      "model": "Compact Par 18 MKII",
+      "category": "wash",
+      "channels": 6,
+      "channel_layout": [
+        {"index": 0, "name": "Dimmer", "type": "intensity"},
+        {"index": 1, "name": "Rot", "type": "red"},
+        {"index": 2, "name": "Grün", "type": "green"},
+        {"index": 3, "name": "Blau", "type": "blue"},
+        {"index": 4, "name": "Strobe", "type": "shutter"},
+        {"index": 5, "name": "Sound Mode", "type": "control"}
+      ]
+    },
+    {
+      "id": "martin_atomic_3000",
+      "manufacturer": "Martin",
+      "model": "Atomic 3000 LED Strobe",
+      "category": "strobe",
+      "channels": 5,
+      "channel_layout": [
+        {"index": 0, "name": "Dimmer", "type": "intensity"},
+        {"index": 1, "name": "Strobe Rate", "type": "shutter"},
+        {"index": 2, "name": "Strobe Duration", "type": "shutter"},
+        {"index": 3, "name": "Flash", "type": "shutter"},
+        {"index": 4, "name": "Control", "type": "control"}
+      ]
+    },
+    {
+      "id": "laserworld_el_200rgb",
+      "manufacturer": "Laserworld",
+      "model": "EL-200RGB",
+      "category": "laser",
+      "channels": 13,
+      "channel_layout": [
+        {"index": 0, "name": "Mode", "type": "control"},
+        {"index": 1, "name": "Pattern Group", "type": "gobo"},
+        {"index": 2, "name": "Pattern", "type": "gobo"},
+        {"index": 3, "name": "Zoom", "type": "zoom"},
+        {"index": 4, "name": "Y-Axis Rolling", "type": "tilt"},
+        {"index": 5, "name": "X-Axis Rolling", "type": "pan"},
+        {"index": 6, "name": "Z-Axis Rolling", "type": "rotation"},
+        {"index": 7, "name": "Y-Axis Moving", "type": "tilt"},
+        {"index": 8, "name": "X-Axis Moving", "type": "pan"},
+        {"index": 9, "name": "Color", "type": "color"},
+        {"index": 10, "name": "Dimming", "type": "intensity"},
+        {"index": 11, "name": "Speed", "type": "speed"},
+        {"index": 12, "name": "Reset", "type": "control"}
+      ]
+    },
+    {
+      "id": "chauvet_intimidator_spot_360",
+      "manufacturer": "Chauvet",
+      "model": "Intimidator Spot 360",
+      "category": "moving_head",
+      "channels": 14,
+      "channel_layout": [
+        {"index": 0, "name": "Pan", "type": "pan"},
+        {"index": 1, "name": "Pan Fine", "type": "pan_fine"},
+        {"index": 2, "name": "Tilt", "type": "tilt"},
+        {"index": 3, "name": "Tilt Fine", "type": "tilt_fine"},
+        {"index": 4, "name": "Speed", "type": "speed"},
+        {"index": 5, "name": "Color Wheel", "type": "color"},
+        {"index": 6, "name": "Gobo Wheel", "type": "gobo"},
+        {"index": 7, "name": "Gobo Rotation", "type": "gobo_rotation"},
+        {"index": 8, "name": "Prism", "type": "prism"},
+        {"index": 9, "name": "Focus", "type": "focus"},
+        {"index": 10, "name": "Dimmer", "type": "intensity"},
+        {"index": 11, "name": "Shutter", "type": "shutter"},
+        {"index": 12, "name": "Control", "type": "control"},
+        {"index": 13, "name": "Movement Macros", "type": "macro"}
+      ]
+    },
+    {
+      "id": "elation_sixpar_300",
+      "manufacturer": "Elation",
+      "model": "SixPar 300",
+      "category": "par",
+      "channels": 12,
+      "channel_layout": [
+        {"index": 0, "name": "Rot", "type": "red"},
+        {"index": 1, "name": "Grün", "type": "green"},
+        {"index": 2, "name": "Blau", "type": "blue"},
+        {"index": 3, "name": "Weiß", "type": "white"},
+        {"index": 4, "name": "Amber", "type": "amber"},
+        {"index": 5, "name": "UV", "type": "uv"},
+        {"index": 6, "name": "Dimmer", "type": "intensity"},
+        {"index": 7, "name": "Dimmer Mode", "type": "control"},
+        {"index": 8, "name": "Strobe", "type": "shutter"},
+        {"index": 9, "name": "Color Macro", "type": "color"},
+        {"index": 10, "name": "Auto Mode", "type": "program"},
+        {"index": 11, "name": "Auto Speed", "type": "speed"}
+      ]
+    },
+    {
+      "id": "blizzard_snowball",
+      "manufacturer": "Blizzard",
+      "model": "Snowball DMX",
+      "category": "effect",
+      "channels": 4,
+      "channel_layout": [
+        {"index": 0, "name": "Rotation", "type": "rotation"},
+        {"index": 1, "name": "Red/Magenta", "type": "color"},
+        {"index": 2, "name": "Green/Blue", "type": "color"},
+        {"index": 3, "name": "Strobe", "type": "shutter"}
+      ]
+    },
+    {
+      "id": "eurolite_pll_384_cw_ww",
+      "manufacturer": "Eurolite",
+      "model": "PLL-384 CW/WW",
+      "category": "panel",
+      "channels": 5,
+      "channel_layout": [
+        {"index": 0, "name": "Master Dimmer", "type": "intensity"},
+        {"index": 1, "name": "Cold White", "type": "white"},
+        {"index": 2, "name": "Warm White", "type": "white"},
+        {"index": 3, "name": "Strobe", "type": "shutter"},
+        {"index": 4, "name": "Program/Mode", "type": "program"}
+      ]
+    },
+    {
+      "id": "stairville_mini_stage_par_cw_ww_a",
+      "manufacturer": "Stairville",
+      "model": "Mini Stage PAR CW/WW/A",
+      "category": "par",
+      "channels": 4,
+      "channel_layout": [
+        {"index": 0, "name": "Master Dimmer", "type": "intensity"},
+        {"index": 1, "name": "Cold White", "type": "white"},
+        {"index": 2, "name": "Warm White", "type": "white"},
+        {"index": 3, "name": "Amber", "type": "amber"}
+      ]
+    },
+    {
+      "id": "stairville_wild_wash_132_led_cw",
+      "manufacturer": "Stairville",
+      "model": "Wild Wash 132 LED CW",
+      "category": "wash",
+      "channels": 10,
+      "channel_layout": [
+        {"index": 0, "name": "Pan", "type": "pan"},
+        {"index": 1, "name": "Pan Fine", "type": "pan_fine"},
+        {"index": 2, "name": "Tilt", "type": "tilt"},
+        {"index": 3, "name": "Tilt Fine", "type": "tilt_fine"},
+        {"index": 4, "name": "Pan/Tilt Speed", "type": "speed"},
+        {"index": 5, "name": "Dimmer", "type": "intensity"},
+        {"index": 6, "name": "Strobe", "type": "shutter"},
+        {"index": 7, "name": "Auto Program", "type": "program"},
+        {"index": 8, "name": "Auto Speed", "type": "speed"},
+        {"index": 9, "name": "Control/Reset", "type": "control"}
+      ]
+    }
+  ]
+}

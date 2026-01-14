@@ -171,6 +171,12 @@
             </div>
             <div class="modal-body">
                 <div class="form-group">
+                    <label>Fixture Library</label>
+                    <select id="fixtureSelect" class="input" onchange="app.selectFixture()">
+                        <option value="">-- Manuell konfigurieren --</option>
+                    </select>
+                </div>
+                <div class="form-group">
                     <label>Gerätename</label>
                     <input type="text" id="deviceName" placeholder="z.B. Bühnenlicht Links" class="input">
                 </div>
@@ -188,12 +194,17 @@
                     <label>Start-Kanal (1-512)</label>
                     <input type="number" id="deviceChannel" value="1" min="1" max="512" class="input">
                 </div>
-                <div class="form-group">
+                <div class="form-group" id="manualTypeGroup">
                     <label>Gerätetyp</label>
                     <div class="button-group">
                         <button class="btn-option active" data-type="dimmer" onclick="app.selectDeviceType('dimmer')">Dimmer</button>
                         <button class="btn-option" data-type="rgb" onclick="app.selectDeviceType('rgb')">RGB</button>
                         <button class="btn-option" data-type="rgbw" onclick="app.selectDeviceType('rgbw')">RGBW</button>
+                    </div>
+                </div>
+                <div class="form-group" id="fixtureInfo" style="display: none;">
+                    <div class="info-message">
+                        <strong id="fixtureInfoText"></strong>
                     </div>
                 </div>
             </div>
