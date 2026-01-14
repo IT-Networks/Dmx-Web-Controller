@@ -1023,24 +1023,31 @@ class EffectEngine:
         for device in devices_list:
             device_id = device.get('id')
             num_channels = len(device['values'])
+            channels_per_pixel = 3  # Assume RGB
+            num_pixels = num_channels // channels_per_pixel
 
             if pattern_type == 'wave':
-                # Create wave pattern
+                # Create RGB wave pattern
                 wavelength = next_pattern.get('wavelength', 10)
                 amplitude = next_pattern.get('amplitude', 255)
+                wave_color = next_pattern.get('color', [255, 255, 255])
                 offset = factor * wavelength
 
-                for i in range(num_channels):
-                    wave_value = (math.sin((i + offset) * 2 * math.pi / wavelength) + 1) / 2
-                    device['values'][i] = int(wave_value * amplitude)
+                for pixel in range(num_pixels):
+                    # Calculate wave value for this pixel
+                    wave_value = (math.sin((pixel + offset) * 2 * math.pi / wavelength) + 1) / 2
+                    brightness_factor = wave_value * (amplitude / 255.0)
+
+                    # Apply to RGB channels
+                    for c in range(channels_per_pixel):
+                        channel_idx = pixel * channels_per_pixel + c
+                        if channel_idx < num_channels:
+                            device['values'][channel_idx] = int(wave_color[c] * brightness_factor)
 
             elif pattern_type == 'gradient':
-                # Create gradient across strip
-                start_color = prev_pattern.get('color', [255, 0, 0])
-                end_color = next_pattern.get('color', [0, 0, 255])
-
-                channels_per_pixel = 3  # Assume RGB
-                num_pixels = num_channels // channels_per_pixel
+                # Create gradient across strip with temporal interpolation
+                start_color = next_pattern.get('start_color', [255, 0, 0])
+                end_color = next_pattern.get('end_color', [0, 0, 255])
 
                 for pixel in range(num_pixels):
                     pixel_factor = pixel / max(1, num_pixels - 1)
@@ -1051,17 +1058,24 @@ class EffectEngine:
                             device['values'][channel_idx] = max(0, min(255, value))
 
             elif pattern_type == 'chase':
-                # Moving light chase across strip
-                position = factor * num_channels
+                # Moving RGB light chase across strip
                 chase_width = next_pattern.get('width', 3)
+                chase_color = next_pattern.get('color', [255, 255, 255])
+                position = factor * num_pixels  # Position in pixels, not channels
 
-                for i in range(num_channels):
-                    distance = abs(i - position)
+                for pixel in range(num_pixels):
+                    distance = abs(pixel - position)
                     if distance < chase_width:
-                        brightness = int(255 * (1 - distance / chase_width))
-                        device['values'][i] = brightness
+                        brightness_factor = 1 - (distance / chase_width)
+                        for c in range(channels_per_pixel):
+                            channel_idx = pixel * channels_per_pixel + c
+                            if channel_idx < num_channels:
+                                device['values'][channel_idx] = int(chase_color[c] * brightness_factor)
                     else:
-                        device['values'][i] = 0
+                        for c in range(channels_per_pixel):
+                            channel_idx = pixel * channels_per_pixel + c
+                            if channel_idx < num_channels:
+                                device['values'][channel_idx] = 0
 
             else:  # solid or default
                 # Uniform color interpolation
