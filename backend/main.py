@@ -54,6 +54,13 @@ fixtures = []
 connected_clients: List[WebSocket] = []
 is_fading = False
 active_effects: Dict[str, asyncio.Task] = {}  # effect_id -> Task
+current_audio_data: Dict[str, float] = {  # Current audio levels from clients
+    'bass': 0.0,
+    'mid': 0.0,
+    'high': 0.0,
+    'overall': 0.0,
+    'peak': 0
+}
 
 
 class ArtNetController:
@@ -359,6 +366,74 @@ class EffectEngine:
 
             color_idx = (color_idx + 1) % len(colors)
 
+    @staticmethod
+    async def sound_reactive(target_ids: List[str], mode: str = 'intensity',
+                            frequency_band: str = 'overall', sensitivity: float = 1.0,
+                            is_group: bool = False):
+        """Sound-reaktiver Effekt"""
+        global current_audio_data
+        import colorsys
+
+        last_trigger = 0
+        flash_duration = 0.05
+
+        while True:
+            target_devices = []
+            if is_group:
+                for group_id in target_ids:
+                    target_devices.extend(get_group_devices(group_id))
+            else:
+                target_devices = [d for d in devices if d['id'] in target_ids]
+
+            # Get audio level for selected frequency band
+            audio_level = current_audio_data.get(frequency_band, 0.0)
+            adjusted_level = min(1.0, audio_level * sensitivity)
+
+            if mode == 'flash':
+                # Flash on beat detection (simple threshold)
+                threshold = 0.7 / sensitivity
+                if audio_level > threshold and (asyncio.get_event_loop().time() - last_trigger) > 0.1:
+                    for device in target_devices:
+                        for i in range(len(device['values'])):
+                            device['values'][i] = 255
+                        send_device_dmx(device)
+
+                    last_trigger = asyncio.get_event_loop().time()
+                    await asyncio.sleep(flash_duration)
+
+                    # Turn off
+                    for device in target_devices:
+                        for i in range(len(device['values'])):
+                            device['values'][i] = 0
+                        send_device_dmx(device)
+                else:
+                    await asyncio.sleep(0.02)
+
+            elif mode == 'intensity':
+                # Map audio level to brightness
+                brightness = int(adjusted_level * 255)
+
+                for device in target_devices:
+                    for i in range(len(device['values'])):
+                        device['values'][i] = brightness
+                    send_device_dmx(device)
+
+                await asyncio.sleep(0.02)
+
+            elif mode == 'color':
+                # Map audio level to color hue
+                hue = adjusted_level * 270  # 0-270 degrees (blue to red)
+                r, g, b = colorsys.hsv_to_rgb(hue / 360, 1.0, 1.0)
+
+                for device in target_devices:
+                    if device['device_type'] in ['rgb', 'rgbw'] and len(device['values']) >= 3:
+                        device['values'][0] = int(r * 255)
+                        device['values'][1] = int(g * 255)
+                        device['values'][2] = int(b * 255)
+                        send_device_dmx(device)
+
+                await asyncio.sleep(0.02)
+
 
 effect_engine = EffectEngine()
 
@@ -394,6 +469,16 @@ async def start_effect(effect_id: str, effect_type: str, target_ids: List[str],
             colors = params.get('colors', [(255, 0, 0), (0, 255, 0), (0, 0, 255)])
             task = asyncio.create_task(
                 effect_engine.color_fade(target_ids, colors, params.get('speed', 2.0), is_group)
+            )
+        elif effect_type == 'sound_reactive':
+            task = asyncio.create_task(
+                effect_engine.sound_reactive(
+                    target_ids,
+                    mode=params.get('mode', 'intensity'),
+                    frequency_band=params.get('frequency_band', 'overall'),
+                    sensitivity=params.get('sensitivity', 1.0),
+                    is_group=is_group
+                )
             )
         else:
             return False
@@ -703,11 +788,16 @@ async def start_effect_endpoint(effect_id: str):
     if not effect:
         return {"success": False, "error": "Effect not found"}
 
+    # Merge sound_config into params for sound_reactive effects
+    params = effect.get('params', {}).copy()
+    if effect.get('sound_reactive') and effect.get('sound_config'):
+        params.update(effect['sound_config'])
+
     success = await start_effect(
         effect_id,
         effect['type'],
         effect.get('target_ids', []),
-        effect.get('params', {}),
+        params,
         effect.get('is_group', False)
     )
 
@@ -878,13 +968,25 @@ async def websocket_endpoint(websocket: WebSocket):
                     device['values'][channel_idx] = value
                     send_device_dmx(device)
                     save_devices()
-                    
+
                     # Broadcast an alle anderen Clients
                     await broadcast_update({
                         'type': 'device_values_updated',
                         'device_id': data['device_id'],
                         'values': device['values']
                     })
+
+            elif data['type'] == 'audio_data':
+                # Update global audio data from client
+                global current_audio_data
+                audio_info = data.get('data', {})
+                current_audio_data.update({
+                    'bass': audio_info.get('bass', 0.0),
+                    'mid': audio_info.get('mid', 0.0),
+                    'high': audio_info.get('high', 0.0),
+                    'overall': audio_info.get('overall', 0.0),
+                    'peak': audio_info.get('peak', 0)
+                })
     
     except WebSocketDisconnect:
         connected_clients.remove(websocket)

@@ -586,10 +586,7 @@ class DMXController {
             backdrop.addEventListener('click', (e) => e.target.parentElement.classList.remove('active'));
         });
     }
-}
 
-const app = new DMXController();
-    
     // ===== Fixture Library =====
     async loadFixtures() {
         try {
@@ -601,7 +598,7 @@ const app = new DMXController();
             console.error('Error loading fixtures:', error);
         }
     }
-    
+
     populateFixtureSelect() {
         const select = document.getElementById('fixtureSelect');
         const categoryNames = {
@@ -615,48 +612,49 @@ const app = new DMXController();
             'beam': 'Beam Lights',
             'strobe': 'Strobes',
             'laser': 'Laser',
-            'effect': 'Effekte'
+            'effect': 'Effekte',
+            'panel': 'LED Panels'
         };
-        
+
         for (const [category, fixtures] of Object.entries(this.fixtures)) {
             const optgroup = document.createElement('optgroup');
             optgroup.label = categoryNames[category] || category;
-            
+
             fixtures.forEach(fixture => {
                 const option = document.createElement('option');
                 option.value = fixture.id;
                 option.textContent = `${fixture.manufacturer} ${fixture.model} (${fixture.channels}CH)`;
                 optgroup.appendChild(option);
             });
-            
+
             select.appendChild(optgroup);
         }
     }
-    
+
     async selectFixture() {
         const fixtureId = document.getElementById('fixtureSelect').value;
         const manualTypeGroup = document.getElementById('manualTypeGroup');
         const fixtureInfo = document.getElementById('fixtureInfo');
         const fixtureInfoText = document.getElementById('fixtureInfoText');
-        
+
         if (!fixtureId) {
             manualTypeGroup.style.display = 'block';
             fixtureInfo.style.display = 'none';
             this.selectedFixture = null;
             return;
         }
-        
+
         try {
             const response = await fetch(`/api/fixtures/${fixtureId}`);
             const data = await response.json();
             const fixture = data.fixture;
-            
+
             if (fixture) {
                 this.selectedFixture = fixture;
                 manualTypeGroup.style.display = 'none';
                 fixtureInfo.style.display = 'block';
                 fixtureInfoText.textContent = `${fixture.manufacturer} ${fixture.model} - ${fixture.channels} Kanäle`;
-                
+
                 if (!document.getElementById('deviceName').value) {
                     document.getElementById('deviceName').value = `${fixture.manufacturer} ${fixture.model}`;
                 }
@@ -665,3 +663,448 @@ const app = new DMXController();
             console.error('Error loading fixture:', error);
         }
     }
+
+    // ===== Sound & Audio =====
+    async toggleSound() {
+        if (!this.audioAnalyzer) {
+            this.audioAnalyzer = new AudioAnalyzer((audioData) => this.handleAudioData(audioData));
+            this.currentAudioData = null;
+        }
+
+        const btn = document.getElementById('startSoundBtn');
+        const status = document.getElementById('soundStatus');
+        const levelsDisplay = document.getElementById('soundLevelsDisplay');
+
+        if (this.audioAnalyzer.isActive) {
+            this.audioAnalyzer.stop();
+            btn.textContent = '🎤 Audio aktivieren';
+            status.textContent = 'Inaktiv';
+            status.style.color = 'var(--text-secondary)';
+            levelsDisplay.style.display = 'none';
+        } else {
+            const success = await this.audioAnalyzer.start();
+            if (success) {
+                btn.textContent = '🔇 Audio deaktivieren';
+                status.textContent = 'Aktiv';
+                status.style.color = 'var(--success)';
+                levelsDisplay.style.display = 'block';
+                this.showToast('Audio-Analyse aktiviert', 'success');
+            } else {
+                this.showToast('Mikrofon-Zugriff verweigert', 'error');
+            }
+        }
+    }
+
+    handleAudioData(audioData) {
+        this.currentAudioData = audioData;
+
+        const levelBar = document.getElementById('soundLevelBar');
+        const levelText = document.getElementById('soundLevelText');
+        if (levelBar && levelText) {
+            const percent = Math.round(audioData.overall * 100);
+            levelBar.style.width = percent + '%';
+            levelText.textContent = percent + '%';
+        }
+
+        if (document.getElementById('effectEditorModal') && document.getElementById('effectEditorModal').classList.contains('active')) {
+            this.updateSoundVisualizer(audioData);
+        }
+
+        if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+            this.ws.send(JSON.stringify({
+                type: 'audio_data',
+                data: {
+                    bass: audioData.bass,
+                    mid: audioData.mid,
+                    high: audioData.high,
+                    overall: audioData.overall,
+                    peak: audioData.peak
+                }
+            }));
+        }
+    }
+
+    updateSoundVisualizer(audioData) {
+        const levelBass = document.getElementById('levelBass');
+        const levelMid = document.getElementById('levelMid');
+        const levelHigh = document.getElementById('levelHigh');
+
+        if (levelBass) levelBass.style.width = (audioData.bass * 100) + '%';
+        if (levelMid) levelMid.style.width = (audioData.mid * 100) + '%';
+        if (levelHigh) levelHigh.style.width = (audioData.high * 100) + '%';
+
+        const canvas = document.getElementById('soundVisualizerCanvas');
+        if (!canvas) return;
+
+        const ctx = canvas.getContext('2d');
+        const width = canvas.width;
+        const height = canvas.height;
+
+        ctx.fillStyle = 'getComputedStyle(document.body).getPropertyValue("--bg-primary")' || '#0f172a';
+        ctx.fillRect(0, 0, width, height);
+
+        if (audioData.raw && audioData.raw.length > 0) {
+            const barWidth = width / Math.min(audioData.raw.length, 64);
+            const maxHeight = height;
+            const step = Math.floor(audioData.raw.length / 64);
+
+            for (let i = 0; i < 64; i++) {
+                const dataIndex = Math.floor(i * step);
+                const barHeight = (audioData.raw[dataIndex] / 255) * maxHeight;
+                const hue = (i / 64) * 180 + 180;
+                ctx.fillStyle = `hsl(${hue}, 70%, 60%)`;
+                ctx.fillRect(i * barWidth, maxHeight - barHeight, barWidth - 1, barHeight);
+            }
+        }
+    }
+
+    toggleSoundPanel() {
+        const panel = document.getElementById('soundControlPanel');
+        const body = panel.querySelector('.sound-panel-body');
+        const btn = panel.querySelector('.btn-icon');
+
+        if (body.style.display === 'none') {
+            body.style.display = 'block';
+            btn.textContent = '−';
+        } else {
+            body.style.display = 'none';
+            btn.textContent = '+';
+        }
+    }
+
+    // ===== Effect Editor =====
+    createEffect(type) {
+        this.currentEffectConfig = {
+            type: type,
+            name: '',
+            target_ids: [],
+            is_group: false,
+            params: {},
+            sound_reactive: false,
+            sound_config: {}
+        };
+
+        this.openEffectEditor();
+    }
+
+    openEffectEditor() {
+        const modal = document.getElementById('effectEditorModal');
+        const title = document.getElementById('effectEditorTitle');
+
+        modal.classList.add('active');
+        title.textContent = this.currentEffectConfig.name || 'Neuer Effekt';
+
+        document.getElementById('effectEditorType').value = this.currentEffectConfig.type || 'strobe';
+        this.populateEffectTargets();
+        this.updateEffectEditorParams();
+        this.initEffectPreview();
+
+        document.getElementById('effectSoundReactive').checked = this.currentEffectConfig.sound_reactive || false;
+        this.toggleSoundReactive();
+    }
+
+    closeEffectEditor() {
+        const modal = document.getElementById('effectEditorModal');
+        modal.classList.remove('active');
+        this.stopPreviewEffect();
+        this.currentEffectConfig = null;
+    }
+
+    populateEffectTargets() {
+        const deviceSelect = document.getElementById('effectDeviceSelect');
+        deviceSelect.innerHTML = '';
+
+        this.devices.forEach(device => {
+            const label = document.createElement('label');
+            label.className = 'device-select-item';
+            label.innerHTML = `
+                <input type="checkbox" value="${device.id}" onchange="app.updateEffectTarget()">
+                <span>${device.name}</span>
+            `;
+            deviceSelect.appendChild(label);
+        });
+
+        const groupSelect = document.getElementById('effectGroupSelect');
+        groupSelect.innerHTML = '';
+
+        this.groups.forEach(group => {
+            const label = document.createElement('label');
+            label.className = 'device-select-item';
+            label.innerHTML = `
+                <input type="checkbox" value="${group.id}" onchange="app.updateEffectTarget()">
+                <span>${group.name}</span>
+            `;
+            groupSelect.appendChild(label);
+        });
+    }
+
+    selectEffectTargetType(type) {
+        const deviceContainer = document.getElementById('effectTargetDevices');
+        const groupContainer = document.getElementById('effectTargetGroups');
+        const btns = document.querySelectorAll('.target-selector .btn-option');
+
+        btns.forEach(btn => {
+            if (btn.dataset.target === type) {
+                btn.classList.add('active');
+            } else {
+                btn.classList.remove('active');
+            }
+        });
+
+        if (type === 'devices') {
+            deviceContainer.style.display = 'block';
+            groupContainer.style.display = 'none';
+            this.currentEffectConfig.is_group = false;
+        } else {
+            deviceContainer.style.display = 'none';
+            groupContainer.style.display = 'block';
+            this.currentEffectConfig.is_group = true;
+        }
+    }
+
+    updateEffectTarget() {
+        const isGroup = this.currentEffectConfig.is_group;
+        const container = isGroup ?
+            document.getElementById('effectGroupSelect') :
+            document.getElementById('effectDeviceSelect');
+
+        const checkboxes = container.querySelectorAll('input[type="checkbox"]:checked');
+        this.currentEffectConfig.target_ids = Array.from(checkboxes).map(cb => cb.value);
+    }
+
+    updateEffectEditorParams() {
+        const type = document.getElementById('effectEditorType').value;
+        const paramsContainer = document.getElementById('effectEditorParams');
+
+        this.currentEffectConfig.type = type;
+
+        let paramsHTML = '';
+
+        switch (type) {
+            case 'strobe':
+                paramsHTML = `
+                    <div class="form-group">
+                        <label>Geschwindigkeit (Blitze/Sek)</label>
+                        <input type="range" id="paramSpeed" class="slider" min="1" max="20" value="10" oninput="app.updateParamValue('speed', this.value)">
+                        <div class="slider-value" id="paramSpeedValue">10 Hz</div>
+                    </div>
+                `;
+                break;
+
+            case 'rainbow':
+            case 'chase':
+            case 'color_fade':
+                paramsHTML = `
+                    <div class="form-group">
+                        <label>Geschwindigkeit</label>
+                        <input type="range" id="paramSpeed" class="slider" min="1" max="100" value="50" oninput="app.updateParamValue('speed', this.value)">
+                        <div class="slider-value" id="paramSpeedValue">50%</div>
+                    </div>
+                `;
+                break;
+
+            case 'pulse':
+                paramsHTML = `
+                    <div class="form-group">
+                        <label>Geschwindigkeit</label>
+                        <input type="range" id="paramSpeed" class="slider" min="1" max="100" value="50" oninput="app.updateParamValue('speed', this.value)">
+                        <div class="slider-value" id="paramSpeedValue">50%</div>
+                    </div>
+                    <div class="form-group">
+                        <label>Minimale Helligkeit (%)</label>
+                        <input type="range" id="paramMin" class="slider" min="0" max="100" value="0" oninput="app.updateParamValue('min', this.value)">
+                        <div class="slider-value" id="paramMinValue">0%</div>
+                    </div>
+                `;
+                break;
+
+            case 'sound_reactive':
+                paramsHTML = `
+                    <div class="form-group">
+                        <label>Effekt-Modus</label>
+                        <select id="paramMode" class="input" onchange="app.updateParamValue('mode', this.value)">
+                            <option value="flash">Flash (Blitze)</option>
+                            <option value="intensity">Intensität</option>
+                            <option value="color">Farbwechsel</option>
+                        </select>
+                    </div>
+                `;
+                break;
+        }
+
+        paramsContainer.innerHTML = paramsHTML;
+    }
+
+    updateParamValue(param, value) {
+        this.currentEffectConfig.params[param] = parseFloat(value);
+
+        const valueDisplay = document.getElementById(`param${param.charAt(0).toUpperCase() + param.slice(1)}Value`);
+        if (valueDisplay) {
+            if (param === 'speed' && this.currentEffectConfig.type === 'strobe') {
+                valueDisplay.textContent = value + ' Hz';
+            } else {
+                valueDisplay.textContent = value + '%';
+            }
+        }
+    }
+
+    toggleSoundReactive() {
+        const checkbox = document.getElementById('effectSoundReactive');
+        const config = document.getElementById('soundReactivityConfig');
+        const visualizer = document.getElementById('soundVisualizer');
+
+        if (checkbox.checked) {
+            config.style.display = 'block';
+            visualizer.style.display = 'block';
+            this.currentEffectConfig.sound_reactive = true;
+
+            if (!this.audioAnalyzer || !this.audioAnalyzer.isActive) {
+                this.toggleSound();
+            }
+        } else {
+            config.style.display = 'none';
+            visualizer.style.display = 'none';
+            this.currentEffectConfig.sound_reactive = false;
+        }
+    }
+
+    initEffectPreview() {
+        const canvas = document.getElementById('effectPreviewCanvas');
+        if (!canvas) return;
+
+        this.previewCanvas = canvas;
+        this.previewCtx = canvas.getContext('2d');
+        this.previewAnimation = null;
+    }
+
+    previewEffect() {
+        if (!this.previewCanvas || !this.previewCtx) return;
+
+        const canvas = this.previewCanvas;
+        const ctx = this.previewCtx;
+        const width = canvas.width;
+        const height = canvas.height;
+
+        let frame = 0;
+        const type = this.currentEffectConfig.type;
+
+        const animate = () => {
+            ctx.clearRect(0, 0, width, height);
+            ctx.fillStyle = '#0f172a';
+            ctx.fillRect(0, 0, width, height);
+
+            const numLights = 8;
+            const lightWidth = (width - 40) / numLights;
+            const lightHeight = height - 40;
+
+            for (let i = 0; i < numLights; i++) {
+                const x = 20 + i * lightWidth;
+                const y = 20;
+
+                let color = '#475569';
+
+                switch (type) {
+                    case 'strobe':
+                        color = frame % 10 < 2 ? '#ffffff' : '#1e293b';
+                        break;
+
+                    case 'rainbow':
+                        const hue = (frame * 2 + i * 45) % 360;
+                        color = `hsl(${hue}, 70%, 60%)`;
+                        break;
+
+                    case 'chase':
+                        const active = Math.floor(frame / 5) % numLights;
+                        color = i === active ? '#3b82f6' : '#1e293b';
+                        break;
+
+                    case 'pulse':
+                        const intensity = (Math.sin(frame * 0.1) + 1) / 2;
+                        const brightness = Math.floor(intensity * 255);
+                        color = `rgb(${brightness}, ${brightness}, ${brightness})`;
+                        break;
+
+                    case 'color_fade':
+                        const hue2 = (frame * 3) % 360;
+                        color = `hsl(${hue2}, 70%, 60%)`;
+                        break;
+
+                    case 'sound_reactive':
+                        if (this.currentAudioData) {
+                            const level = this.currentAudioData.overall;
+                            const brightness = Math.floor(level * 255);
+                            color = `rgb(${brightness}, ${brightness / 2}, ${brightness})`;
+                        }
+                        break;
+                }
+
+                ctx.fillStyle = color;
+                ctx.fillRect(x, y, lightWidth - 5, lightHeight);
+            }
+
+            frame++;
+            this.previewAnimation = requestAnimationFrame(animate);
+        };
+
+        animate();
+    }
+
+    stopPreviewEffect() {
+        if (this.previewAnimation) {
+            cancelAnimationFrame(this.previewAnimation);
+            this.previewAnimation = null;
+
+            if (this.previewCtx && this.previewCanvas) {
+                this.previewCtx.fillStyle = '#0f172a';
+                this.previewCtx.fillRect(0, 0, this.previewCanvas.width, this.previewCanvas.height);
+            }
+        }
+    }
+
+    async saveEffectFromEditor() {
+        const name = document.getElementById('effectEditorName').value;
+        if (!name) {
+            this.showToast('Bitte gib einen Effekt-Namen ein', 'error');
+            return;
+        }
+
+        if (this.currentEffectConfig.target_ids.length === 0) {
+            this.showToast('Bitte wähle mindestens ein Ziel aus', 'error');
+            return;
+        }
+
+        this.currentEffectConfig.name = name;
+
+        if (this.currentEffectConfig.sound_reactive) {
+            this.currentEffectConfig.sound_config = {
+                frequency_band: document.getElementById('soundFrequencyBand').value,
+                sensitivity: parseInt(document.getElementById('soundSensitivity').value) / 100,
+                control_param: document.getElementById('soundControlParam').value
+            };
+        }
+
+        try {
+            const response = await fetch('/api/effects', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(this.currentEffectConfig)
+            });
+
+            if (response.ok) {
+                const data = await response.json();
+                this.showToast('Effekt erstellt', 'success');
+                this.closeEffectEditor();
+                this.stopPreviewEffect();
+
+                await this.startEffect(data.effect.id);
+            } else {
+                this.showToast('Fehler beim Erstellen des Effekts', 'error');
+            }
+        } catch (error) {
+            console.error('Error creating effect:', error);
+            this.showToast('Fehler beim Erstellen des Effekts', 'error');
+        }
+    }
+}
+
+const app = new DMXController();
