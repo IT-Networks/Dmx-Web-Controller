@@ -748,6 +748,91 @@ async def stop_effect(effect_id: str):
     return False
 
 
+# Timeline/Sequence Playback Engine
+async def play_sequence(sequence_id: str, loop: bool = False):
+    """Spielt eine Sequence ab"""
+    sequence = next((s for s in sequences if s['id'] == sequence_id), None)
+    if not sequence:
+        return False
+
+    try:
+        while True:
+            for step in sequence.get('steps', []):
+                step_type = step.get('type')
+                duration = step.get('duration', 0) / 1000  # ms to seconds
+
+                if step_type == 'scene':
+                    # Activate scene
+                    scene_id = step.get('target_id')
+                    await activate_scene(scene_id)
+
+                elif step_type == 'effect':
+                    # Start effect
+                    effect_id = step.get('target_id')
+                    effect = next((e for e in effects if e['id'] == effect_id), None)
+                    if effect:
+                        await start_effect(
+                            f"{effect_id}_seq",
+                            effect['type'],
+                            effect.get('target_ids', []),
+                            effect.get('params', {}),
+                            effect.get('is_group', False)
+                        )
+
+                elif step_type == 'wait':
+                    # Just wait
+                    pass
+
+                # Wait for step duration
+                await asyncio.sleep(duration)
+
+                # Stop effect after duration if it was an effect
+                if step_type == 'effect':
+                    effect_id = step.get('target_id')
+                    await stop_effect(f"{effect_id}_seq")
+
+            # Break if not looping
+            if not loop:
+                break
+
+        return True
+
+    except asyncio.CancelledError:
+        # Clean up on cancel
+        return False
+
+
+async def start_sequence(sequence_id: str):
+    """Startet eine Sequence"""
+    global active_sequences
+
+    # Stop existing sequence
+    if sequence_id in active_sequences:
+        active_sequences[sequence_id].cancel()
+
+    # Get sequence config
+    sequence = next((s for s in sequences if s['id'] == sequence_id), None)
+    if not sequence:
+        return False
+
+    # Start sequence playback
+    task = asyncio.create_task(
+        play_sequence(sequence_id, sequence.get('loop', False))
+    )
+    active_sequences[sequence_id] = task
+
+    return True
+
+
+async def stop_sequence(sequence_id: str):
+    """Stoppt eine Sequence"""
+    if sequence_id in active_sequences:
+        active_sequences[sequence_id].cancel()
+        del active_sequences[sequence_id]
+        return True
+    return False
+
+
 # Fade-Funktion
 async def fade_to_scene(scene_id: str):
     """Führt Fade zur Szene durch"""
@@ -1008,7 +1093,12 @@ async def get_effects():
             {"id": "rainbow", "name": "Regenbogen", "params": ["speed"]},
             {"id": "chase", "name": "Lauflicht", "params": ["speed"]},
             {"id": "pulse", "name": "Pulsieren", "params": ["speed"]},
-            {"id": "color_fade", "name": "Farbwechsel", "params": ["speed", "colors"]}
+            {"id": "color_fade", "name": "Farbwechsel", "params": ["speed", "colors"]},
+            {"id": "fire", "name": "Feuer", "params": ["speed", "intensity"]},
+            {"id": "lightning", "name": "Blitz", "params": ["min_delay", "max_delay"]},
+            {"id": "scanner", "name": "Scanner", "params": ["speed", "range"]},
+            {"id": "matrix", "name": "Matrix", "params": ["speed", "pattern"]},
+            {"id": "twinkle", "name": "Funkeln", "params": ["speed", "density"]}
         ]
     }
 
@@ -1073,6 +1163,81 @@ async def delete_effect(effect_id: str):
     await broadcast_update({
         'type': 'effects_updated',
         'effects': effects
+    })
+
+    return {"success": True}
+
+
+# Sequence/Timeline API
+@app.get("/api/sequences")
+async def get_sequences():
+    """Gibt alle Sequences zurück"""
+    return {"sequences": sequences}
+
+
+@app.post("/api/sequences")
+async def create_sequence(sequence: dict):
+    """Erstellt eine neue Sequence"""
+    sequence['id'] = f"seq_{int(time.time() * 1000)}"
+    sequences.append(sequence)
+    save_sequences()
+
+    await broadcast_update({
+        'type': 'sequences_updated',
+        'sequences': sequences
+    })
+
+    return {"success": True, "sequence": sequence}
+
+
+@app.put("/api/sequences/{sequence_id}")
+async def update_sequence(sequence_id: str, sequence: dict):
+    """Aktualisiert eine Sequence"""
+    global sequences
+
+    idx = next((i for i, s in enumerate(sequences) if s['id'] == sequence_id), None)
+    if idx is not None:
+        sequences[idx] = {**sequences[idx], **sequence, 'id': sequence_id}
+        save_sequences()
+
+        await broadcast_update({
+            'type': 'sequences_updated',
+            'sequences': sequences
+        })
+
+        return {"success": True}
+
+    return {"success": False, "error": "Sequence not found"}
+
+
+@app.post("/api/sequences/{sequence_id}/play")
+async def play_sequence_endpoint(sequence_id: str):
+    """Startet eine Sequence"""
+    success = await start_sequence(sequence_id)
+    return {"success": success}
+
+
+@app.post("/api/sequences/{sequence_id}/stop")
+async def stop_sequence_endpoint(sequence_id: str):
+    """Stoppt eine Sequence"""
+    success = await stop_sequence(sequence_id)
+    return {"success": success}
+
+
+@app.delete("/api/sequences/{sequence_id}")
+async def delete_sequence(sequence_id: str):
+    """Löscht eine Sequence"""
+    global sequences
+
+    # Stop sequence if active
+    await stop_sequence(sequence_id)
+
+    sequences = [s for s in sequences if s['id'] != sequence_id]
+    save_sequences()
+
+    await broadcast_update({
+        'type': 'sequences_updated',
+        'sequences': sequences
     })
 
     return {"success": True}
@@ -1201,7 +1366,8 @@ async def websocket_endpoint(websocket: WebSocket):
         'devices': devices,
         'scenes': scenes,
         'groups': groups,
-        'effects': effects
+        'effects': effects,
+        'sequences': sequences
     })
     
     try:

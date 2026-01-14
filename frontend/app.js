@@ -7,6 +7,7 @@ class DMXController {
         this.scenes = [];
         this.groups = [];
         this.effects = [];
+        this.sequences = [];
         this.fixtures = {};
         this.selectedFixture = null;
         this.selectedDeviceType = 'dimmer';
@@ -92,7 +93,12 @@ class DMXController {
                 this.effects = data.effects;
                 this.renderEffects();
                 break;
-                
+
+            case 'sequences_updated':
+                this.sequences = data.sequences;
+                this.renderSequences();
+                break;
+
             case 'device_values_updated':
                 this.updateDeviceUI(data.device_id, data.values);
                 break;
@@ -142,6 +148,7 @@ class DMXController {
         this.renderGroups();
         this.renderScenes();
         this.renderEffects();
+        this.renderSequences();
     }
     
     // ===== Tab Switching =====
@@ -167,20 +174,22 @@ class DMXController {
             'devices': ['Geräte', 'Verwalte deine DMX-Geräte'],
             'groups': ['Gruppen', 'Steuere mehrere Geräte gleichzeitig'],
             'scenes': ['Szenen', 'Gespeicherte Lichtstimmungen'],
-            'effects': ['Effekte', 'Dynamische Lichteffekte']
+            'effects': ['Effekte', 'Dynamische Lichteffekte'],
+            'sequences': ['Timeline', 'Erstelle Sequenzen aus Szenen und Effekten']
         };
-        
+
         const [title, subtitle] = titles[tabName];
         document.getElementById('pageTitle').textContent = title;
         document.getElementById('pageSubtitle').textContent = subtitle;
-        
+
         const buttons = {
             'devices': '<button class="btn btn-primary" onclick="app.showAddDevice()"><svg width="20" height="20" viewBox="0 0 20 20"><path d="M10 3 L10 17 M3 10 L17 10" stroke="currentColor" stroke-width="2"/></svg><span>Gerät hinzufügen</span></button>',
             'groups': '<button class="btn btn-primary" onclick="app.showAddGroup()"><svg width="20" height="20" viewBox="0 0 20 20"><path d="M10 3 L10 17 M3 10 L17 10" stroke="currentColor" stroke-width="2"/></svg><span>Gruppe erstellen</span></button>',
             'scenes': '<button class="btn btn-primary" onclick="app.showAddScene()"><svg width="20" height="20" viewBox="0 0 20 20"><path d="M10 3 L10 17 M3 10 L17 10" stroke="currentColor" stroke-width="2"/></svg><span>Szene erstellen</span></button>',
-            'effects': ''
+            'effects': '',
+            'sequences': '<button class="btn btn-primary" onclick="app.showAddSequence()"><svg width="20" height="20" viewBox="0 0 20 20"><path d="M10 3 L10 17 M3 10 L17 10" stroke="currentColor" stroke-width="2"/></svg><span>Timeline hinzufügen</span></button>'
         };
-        
+
         document.getElementById('headerActions').innerHTML = buttons[tabName];
     }
     
@@ -1218,6 +1227,265 @@ class DMXController {
         } catch (error) {
             console.error('Error creating effect:', error);
             this.showToast('Fehler beim Erstellen des Effekts', 'error');
+        }
+    }
+
+    // ===== Sequence/Timeline Management =====
+    showAddSequence() {
+        this.currentSequence = {
+            name: '',
+            steps: [],
+            loop: false
+        };
+        this.openSequenceEditor();
+    }
+
+    openSequenceEditor() {
+        const modal = document.getElementById('sequenceEditorModal');
+        modal.classList.add('active');
+
+        document.getElementById('sequenceName').value = this.currentSequence.name || '';
+        document.getElementById('sequenceLoop').checked = this.currentSequence.loop || false;
+
+        this.renderSequenceSteps();
+    }
+
+    closeSequenceEditor() {
+        const modal = document.getElementById('sequenceEditorModal');
+        modal.classList.remove('active');
+        this.currentSequence = null;
+    }
+
+    addSequenceStep(type) {
+        if (!this.currentSequence) return;
+
+        const step = {
+            type: type,
+            target_id: '',
+            duration: type === 'wait' ? 1000 : 5000
+        };
+
+        this.currentSequence.steps.push(step);
+        this.renderSequenceSteps();
+    }
+
+    removeSequenceStep(index) {
+        if (!this.currentSequence) return;
+
+        this.currentSequence.steps.splice(index, 1);
+        this.renderSequenceSteps();
+    }
+
+    updateSequenceStep(index, field, value) {
+        if (!this.currentSequence) return;
+
+        this.currentSequence.steps[index][field] = value;
+    }
+
+    renderSequenceSteps() {
+        const container = document.getElementById('sequenceSteps');
+        if (!this.currentSequence || this.currentSequence.steps.length === 0) {
+            container.innerHTML = '<p style="text-align: center; color: var(--text-secondary); padding: 2rem;">Keine Steps vorhanden. Füge einen Step hinzu!</p>';
+            return;
+        }
+
+        container.innerHTML = this.currentSequence.steps.map((step, index) => {
+            let targetOptions = '';
+
+            if (step.type === 'scene') {
+                targetOptions = this.scenes.map(scene =>
+                    `<option value="${scene.id}" ${step.target_id === scene.id ? 'selected' : ''}>${scene.name}</option>`
+                ).join('');
+            } else if (step.type === 'effect') {
+                targetOptions = this.effects.map(effect =>
+                    `<option value="${effect.id}" ${step.target_id === effect.id ? 'selected' : ''}>${effect.name}</option>`
+                ).join('');
+            }
+
+            const durationSec = (step.duration || 0) / 1000;
+
+            return `
+                <div class="sequence-step">
+                    <div class="sequence-step-number">${index + 1}</div>
+                    <div class="sequence-step-content">
+                        <div class="sequence-step-row">
+                            <span class="sequence-step-type">${step.type}</span>
+                            ${step.type !== 'wait' ? `
+                                <select class="input sequence-step-select" onchange="app.updateSequenceStep(${index}, 'target_id', this.value)">
+                                    <option value="">-- Auswählen --</option>
+                                    ${targetOptions}
+                                </select>
+                            ` : '<span style="flex: 1;">Pause</span>'}
+                        </div>
+                        <div class="sequence-step-row">
+                            <div class="sequence-step-duration">
+                                <label style="font-size: 0.875rem;">Dauer:</label>
+                                <input type="number" class="input" value="${durationSec}" min="0" step="0.5"
+                                    onchange="app.updateSequenceStep(${index}, 'duration', this.value * 1000)">
+                                <span style="font-size: 0.875rem;">Sek</span>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="sequence-step-actions">
+                        <button class="btn-icon btn-danger" onclick="app.removeSequenceStep(${index})">
+                            ×
+                        </button>
+                    </div>
+                </div>
+            `;
+        }).join('');
+    }
+
+    async saveSequence() {
+        const name = document.getElementById('sequenceName').value;
+        if (!name) {
+            this.showToast('Bitte gib einen Namen ein', 'error');
+            return;
+        }
+
+        if (!this.currentSequence.steps.length) {
+            this.showToast('Füge mindestens einen Step hinzu', 'error');
+            return;
+        }
+
+        this.currentSequence.name = name;
+        this.currentSequence.loop = document.getElementById('sequenceLoop').checked;
+
+        try {
+            const method = this.currentSequence.id ? 'PUT' : 'POST';
+            const url = this.currentSequence.id
+                ? `/api/sequences/${this.currentSequence.id}`
+                : '/api/sequences';
+
+            const response = await fetch(url, {
+                method: method,
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(this.currentSequence)
+            });
+
+            if (response.ok) {
+                this.showToast('Timeline gespeichert', 'success');
+                this.closeSequenceEditor();
+            } else {
+                this.showToast('Fehler beim Speichern', 'error');
+            }
+        } catch (error) {
+            console.error('Error saving sequence:', error);
+            this.showToast('Fehler beim Speichern', 'error');
+        }
+    }
+
+    renderSequences() {
+        const container = document.getElementById('sequencesContainer');
+
+        if (!this.sequences || this.sequences.length === 0) {
+            container.innerHTML = `
+                <div class="empty-state">
+                    <svg width="64" height="64" viewBox="0 0 64 64">
+                        <rect x="8" y="24" width="12" height="16" fill="none" stroke="currentColor" stroke-width="2" opacity="0.3"/>
+                        <rect x="26" y="16" width="12" height="32" fill="none" stroke="currentColor" stroke-width="2" opacity="0.3"/>
+                        <rect x="44" y="20" width="12" height="24" fill="none" stroke="currentColor" stroke-width="2" opacity="0.3"/>
+                    </svg>
+                    <h3>Keine Timeline vorhanden</h3>
+                    <p>Erstelle eine Timeline-Sequence für automatisierte Abläufe</p>
+                </div>
+            `;
+            return;
+        }
+
+        container.innerHTML = this.sequences.map(seq => `
+            <div class="card">
+                <div class="card-header">
+                    <h3>${seq.name}</h3>
+                    <span class="badge">${seq.steps.length} Steps</span>
+                </div>
+                <div class="card-body">
+                    <div class="card-info">
+                        ${seq.loop ? '<span class="badge">🔁 Loop</span>' : ''}
+                        <span style="font-size: 0.875rem; color: var(--text-secondary);">
+                            ${this.formatSequenceDuration(seq)}
+                        </span>
+                    </div>
+                </div>
+                <div class="card-actions">
+                    <button class="btn btn-success btn-sm" onclick="app.playSequence('${seq.id}')">
+                        <svg width="16" height="16" viewBox="0 0 16 16">
+                            <path d="M4 2 L12 8 L4 14 Z" fill="currentColor"/>
+                        </svg>
+                        Play
+                    </button>
+                    <button class="btn btn-secondary btn-sm" onclick="app.stopSequence('${seq.id}')">
+                        <svg width="16" height="16" viewBox="0 0 16 16">
+                            <rect x="4" y="4" width="8" height="8" fill="currentColor"/>
+                        </svg>
+                        Stop
+                    </button>
+                    <button class="btn btn-danger btn-sm" onclick="app.deleteSequence('${seq.id}')">
+                        <svg width="16" height="16" viewBox="0 0 16 16">
+                            <path d="M4 4 L12 12 M12 4 L4 12" stroke="currentColor" stroke-width="2"/>
+                        </svg>
+                    </button>
+                </div>
+            </div>
+        `).join('');
+    }
+
+    formatSequenceDuration(seq) {
+        const totalMs = seq.steps.reduce((sum, step) => sum + (step.duration || 0), 0);
+        const seconds = Math.floor(totalMs / 1000);
+        const minutes = Math.floor(seconds / 60);
+        const remainingSeconds = seconds % 60;
+
+        if (minutes > 0) {
+            return `${minutes}m ${remainingSeconds}s`;
+        }
+        return `${seconds}s`;
+    }
+
+    async playSequence(sequenceId) {
+        try {
+            const response = await fetch(`/api/sequences/${sequenceId}/play`, {
+                method: 'POST'
+            });
+
+            if (response.ok) {
+                this.showToast('Timeline gestartet', 'success');
+            }
+        } catch (error) {
+            console.error('Error playing sequence:', error);
+            this.showToast('Fehler beim Starten', 'error');
+        }
+    }
+
+    async stopSequence(sequenceId) {
+        try {
+            const response = await fetch(`/api/sequences/${sequenceId}/stop`, {
+                method: 'POST'
+            });
+
+            if (response.ok) {
+                this.showToast('Timeline gestoppt', 'success');
+            }
+        } catch (error) {
+            console.error('Error stopping sequence:', error);
+            this.showToast('Fehler beim Stoppen', 'error');
+        }
+    }
+
+    async deleteSequence(sequenceId) {
+        if (!confirm('Timeline wirklich löschen?')) return;
+
+        try {
+            const response = await fetch(`/api/sequences/${sequenceId}`, {
+                method: 'DELETE'
+            });
+
+            if (response.ok) {
+                this.showToast('Timeline gelöscht', 'success');
+            }
+        } catch (error) {
+            console.error('Error deleting sequence:', error);
+            this.showToast('Fehler beim Löschen', 'error');
         }
     }
 }
