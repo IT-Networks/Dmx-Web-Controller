@@ -29,6 +29,36 @@ Eine moderne, browserbasierte Steuerungslösung für DMX-Lichtanlagen mit Art-Ne
 - **Auto-Reconnect**: Automatische Wiederverbindung bei Netzwerkproblemen
 - **Live-Feedback**: Änderungen werden sofort auf allen Geräten sichtbar
 
+### 🎯 Gruppen-Management
+- **Multi-Device Control**: Steuere mehrere Geräte gleichzeitig
+- **Master Intensity**: Gemeinsame Helligkeitssteuerung für alle Gruppengeräte
+- **Flexible Zuordnung**: Beliebige Geräte zu Gruppen kombinieren
+- **Echtzeit-Synchronisation**: Änderungen wirken sofort auf alle Gruppengeräte
+
+### ✨ Effekt-Engine
+- **Stroboskop**: Hochgeschwindigkeits-Blitzeffekt mit einstellbarer Frequenz
+- **Regenbogen**: Sanfter HSV-Farbzyklus durch das gesamte Spektrum
+- **Lauflicht (Chase)**: Sequentielle Aktivierung von Geräten
+- **Pulsieren**: Atmende Helligkeitsmodulation
+- **Farbwechsel**: Smooth Fades zwischen benutzerdefinierten Farben
+- **Echtzeit-Steuerung**: Start/Stop von Effekten während der Ausführung
+- **Gruppen & Geräte**: Effekte auf einzelne Geräte oder ganze Gruppen anwendbar
+
+### 🎮 Companion Integration
+- **Stream Deck Support**: Vollständige Bitfocus Companion-Integration
+- **Szenen-Trigger**: Szenen per Knopfdruck aktivieren
+- **Gruppen-Steuerung**: On/Off/Toggle für Gerätegruppen
+- **Effekt-Kontrolle**: Effekte starten und stoppen
+- **Auto-Discovery**: Alle Aktionen werden automatisch bereitgestellt
+
+### 🎨 Moderne UI/UX
+- **Dark Theme**: Professionelles dunkles Design
+- **Sidebar Navigation**: Intuitive Tab-Navigation (Geräte/Gruppen/Szenen/Effekte)
+- **Responsive Design**: Optimiert für Desktop, Tablet und Mobile
+- **Glassmorphism**: Moderne visuelle Effekte
+- **Toast Notifications**: Dezentes Feedback zu allen Aktionen
+- **Empty States**: Hilfreiche Hinweise bei leeren Ansichten
+
 ### 💾 Persistenz & Deployment
 - **Automatisches Speichern**: Konfigurationen und Szenen werden persistent gespeichert
 - **Docker-Ready**: Einfaches Deployment mit Docker Compose
@@ -214,29 +244,59 @@ FastAPI generiert automatisch interaktive API-Docs:
 
 ---
 
+## 🎮 Companion / Stream Deck Setup
+
+### Bitfocus Companion einrichten
+
+1. **Companion installieren** (https://bitfocus.io/companion)
+2. **DMX Controller Modul hinzufügen**:
+   - Generic HTTP Request Modul verwenden
+   - URL: `http://[YOUR_IP]:8000/api/companion/trigger`
+   - Method: POST
+   - Body: `{"type": "scene", "id": "scene_[SCENE_ID]"}`
+
+3. **Aktionen abrufen**:
+   ```bash
+   curl http://localhost:8000/api/companion/actions
+   ```
+
+4. **Verfügbare Aktionen**:
+   - **Szenen aktivieren**: `{"type": "scene", "id": "scene_ID"}`
+   - **Gruppe einschalten**: `{"type": "group", "id": "group_ID", "params": {"action": "on"}}`
+   - **Gruppe ausschalten**: `{"type": "group", "id": "group_ID", "params": {"action": "off"}}`
+   - **Gruppe toggle**: `{"type": "group", "id": "group_ID", "params": {"action": "toggle"}}`
+   - **Effekt starten**: `{"type": "effect", "id": "effect_ID"}`
+   - **Effekt stoppen**: `{"type": "effect", "id": "effect_ID", "params": {"stop": true}}`
+
+---
+
 ## 🤝 Beitragen
 
 Beiträge sind willkommen! Hier sind einige Ideen:
 
-- 🎨 UI/UX Verbesserungen
-- 🔌 Zusätzliche Gerätetypen (Moving Heads, PAR-Cans, etc.)
-- 🎭 Effekt-Engine (Blinken, Fading-Patterns, Chaser)
+- 🔌 Zusätzliche Gerätetypen (Moving Heads, PAR-Cans, Laser)
 - ⏰ Zeitsteuerung & Scheduler
-- 📊 Gruppen-Management
 - 🎮 MIDI/OSC Support
 - 🌍 Mehrsprachigkeit
+- 📱 PWA Support für Offline-Nutzung
+- 🎛️ DMX Input Monitoring
+- 📊 Erweiterte Fixture Library
 
 ---
 
 ## 📋 Roadmap
 
-- [ ] **Gruppen**: Mehrere Geräte gleichzeitig steuern
-- [ ] **Effekte**: Vordefinierte Lichteffekte (Strobe, Rainbow, etc.)
+- [x] **Gruppen**: Mehrere Geräte gleichzeitig steuern ✅
+- [x] **Effekte**: Vordefinierte Lichteffekte (Strobe, Rainbow, etc.) ✅
+- [x] **Moderne UI**: Dark Theme mit Sidebar-Navigation ✅
+- [x] **Companion Integration**: Stream Deck Support ✅
 - [ ] **Timeline**: Zeitbasierte Szenen-Abfolgen
 - [ ] **MIDI Integration**: Steuerung via MIDI-Controller
 - [ ] **Fixture Library**: Vordefinierte Gerätedefinitionen
 - [ ] **Mobile App**: Native iOS/Android App
 - [ ] **Backup/Restore**: Konfiguration exportieren/importieren
+- [ ] **Effect Designer**: Visueller Editor für eigene Effekte
+- [ ] **Multi-Universe UI**: Bessere Verwaltung mehrerer Universen
 
 ---
 

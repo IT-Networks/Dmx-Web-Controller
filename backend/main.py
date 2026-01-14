@@ -39,6 +39,8 @@ DATA_DIR = Path("/data") if Path("/data").exists() else BASE_DIR / "data"
 DATA_DIR.mkdir(exist_ok=True)
 CONFIG_FILE = DATA_DIR / "dmx_config.json"
 SCENES_FILE = DATA_DIR / "dmx_scenes.json"
+GROUPS_FILE = DATA_DIR / "dmx_groups.json"
+EFFECTS_FILE = DATA_DIR / "dmx_effects.json"
 
 # Mount static files
 app.mount("/static", StaticFiles(directory=str(FRONTEND_DIR)), name="static")
@@ -46,8 +48,11 @@ app.mount("/static", StaticFiles(directory=str(FRONTEND_DIR)), name="static")
 # Globale States
 devices = []
 scenes = []
+groups = []
+effects = []
 connected_clients: List[WebSocket] = []
 is_fading = False
+active_effects: Dict[str, asyncio.Task] = {}  # effect_id -> Task
 
 
 class ArtNetController:
@@ -102,16 +107,24 @@ async def broadcast_update(data: dict):
 
 # Daten laden/speichern
 def load_data():
-    """Lädt Geräte und Szenen"""
-    global devices, scenes
-    
+    """Lädt Geräte, Szenen, Gruppen und Effekte"""
+    global devices, scenes, groups, effects
+
     if CONFIG_FILE.exists():
         with open(CONFIG_FILE, 'r') as f:
             devices = json.load(f)
-    
+
     if SCENES_FILE.exists():
         with open(SCENES_FILE, 'r') as f:
             scenes = json.load(f)
+
+    if GROUPS_FILE.exists():
+        with open(GROUPS_FILE, 'r') as f:
+            groups = json.load(f)
+
+    if EFFECTS_FILE.exists():
+        with open(EFFECTS_FILE, 'r') as f:
+            effects = json.load(f)
 
 
 def save_devices():
@@ -126,6 +139,18 @@ def save_scenes():
         json.dump(scenes, f, indent=2)
 
 
+def save_groups():
+    """Speichert Gruppen"""
+    with open(GROUPS_FILE, 'w') as f:
+        json.dump(groups, f, indent=2)
+
+
+def save_effects():
+    """Speichert Effekte"""
+    with open(EFFECTS_FILE, 'w') as f:
+        json.dump(effects, f, indent=2)
+
+
 # DMX Senden
 def send_device_dmx(device):
     """Sendet DMX für ein Gerät"""
@@ -134,8 +159,252 @@ def send_device_dmx(device):
         ch = device['start_channel'] - 1 + i
         if ch < 512:
             channels[ch] = int(val)
-    
+
     controller.send_dmx(device['ip'], device['universe'], channels)
+
+
+# Gruppen-Hilfsfunktionen
+def get_group_devices(group_id: str):
+    """Gibt alle Geräte einer Gruppe zurück"""
+    group = next((g for g in groups if g['id'] == group_id), None)
+    if not group:
+        return []
+
+    return [d for d in devices if d['id'] in group.get('device_ids', [])]
+
+
+def set_group_values(group_id: str, values: dict):
+    """Setzt Werte für alle Geräte in einer Gruppe"""
+    group_devices = get_group_devices(group_id)
+
+    for device in group_devices:
+        # Setze Intensität wenn vorhanden
+        if 'intensity' in values:
+            intensity = values['intensity']
+            for i in range(len(device['values'])):
+                device['values'][i] = int(intensity)
+
+        # Setze RGB Werte wenn vorhanden
+        if 'rgb' in values and device['device_type'] in ['rgb', 'rgbw']:
+            r, g, b = values['rgb']
+            if len(device['values']) >= 3:
+                device['values'][0] = int(r)
+                device['values'][1] = int(g)
+                device['values'][2] = int(b)
+
+        send_device_dmx(device)
+
+    save_devices()
+
+
+# Effekt-Engine
+class EffectEngine:
+    """Verwaltet und führt Lichteffekte aus"""
+
+    @staticmethod
+    async def strobe(target_ids: List[str], speed: float = 0.1, is_group: bool = False):
+        """Stroboskop-Effekt"""
+        while True:
+            target_devices = []
+            if is_group:
+                for group_id in target_ids:
+                    target_devices.extend(get_group_devices(group_id))
+            else:
+                target_devices = [d for d in devices if d['id'] in target_ids]
+
+            # An
+            for device in target_devices:
+                for i in range(len(device['values'])):
+                    device['values'][i] = 255
+                send_device_dmx(device)
+
+            await asyncio.sleep(speed)
+
+            # Aus
+            for device in target_devices:
+                for i in range(len(device['values'])):
+                    device['values'][i] = 0
+                send_device_dmx(device)
+
+            await asyncio.sleep(speed)
+
+    @staticmethod
+    async def rainbow(target_ids: List[str], speed: float = 0.05, is_group: bool = False):
+        """Regenbogen-Effekt (nur RGB/RGBW)"""
+        hue = 0
+        while True:
+            target_devices = []
+            if is_group:
+                for group_id in target_ids:
+                    target_devices.extend(get_group_devices(group_id))
+            else:
+                target_devices = [d for d in devices if d['id'] in target_ids]
+
+            # Konvertiere HSV zu RGB
+            import colorsys
+            r, g, b = colorsys.hsv_to_rgb(hue / 360, 1.0, 1.0)
+
+            for device in target_devices:
+                if device['device_type'] in ['rgb', 'rgbw'] and len(device['values']) >= 3:
+                    device['values'][0] = int(r * 255)
+                    device['values'][1] = int(g * 255)
+                    device['values'][2] = int(b * 255)
+                    send_device_dmx(device)
+
+            hue = (hue + 1) % 360
+            await asyncio.sleep(speed)
+
+    @staticmethod
+    async def chase(target_ids: List[str], speed: float = 0.2, is_group: bool = False):
+        """Chase-Effekt (Lauflicht)"""
+        idx = 0
+        while True:
+            target_devices = []
+            if is_group:
+                for group_id in target_ids:
+                    target_devices.extend(get_group_devices(group_id))
+            else:
+                target_devices = [d for d in devices if d['id'] in target_ids]
+
+            if not target_devices:
+                await asyncio.sleep(speed)
+                continue
+
+            # Alle aus
+            for device in target_devices:
+                for i in range(len(device['values'])):
+                    device['values'][i] = 0
+                send_device_dmx(device)
+
+            # Aktuelles an
+            if idx < len(target_devices):
+                for i in range(len(target_devices[idx]['values'])):
+                    target_devices[idx]['values'][i] = 255
+                send_device_dmx(target_devices[idx])
+
+            idx = (idx + 1) % len(target_devices)
+            await asyncio.sleep(speed)
+
+    @staticmethod
+    async def pulse(target_ids: List[str], speed: float = 0.02, is_group: bool = False):
+        """Pulsierender Effekt (Atmung)"""
+        direction = 1
+        brightness = 0
+
+        while True:
+            target_devices = []
+            if is_group:
+                for group_id in target_ids:
+                    target_devices.extend(get_group_devices(group_id))
+            else:
+                target_devices = [d for d in devices if d['id'] in target_ids]
+
+            for device in target_devices:
+                for i in range(len(device['values'])):
+                    device['values'][i] = int(brightness)
+                send_device_dmx(device)
+
+            brightness += direction * 5
+            if brightness >= 255:
+                brightness = 255
+                direction = -1
+            elif brightness <= 0:
+                brightness = 0
+                direction = 1
+
+            await asyncio.sleep(speed)
+
+    @staticmethod
+    async def color_fade(target_ids: List[str], colors: List[tuple], speed: float = 2.0, is_group: bool = False):
+        """Langsamer Fade zwischen Farben"""
+        color_idx = 0
+
+        while True:
+            target_devices = []
+            if is_group:
+                for group_id in target_ids:
+                    target_devices.extend(get_group_devices(group_id))
+            else:
+                target_devices = [d for d in devices if d['id'] in target_ids]
+
+            start_color = colors[color_idx]
+            next_color = colors[(color_idx + 1) % len(colors)]
+
+            steps = 50
+            delay = speed / steps
+
+            for step in range(steps + 1):
+                progress = step / steps
+
+                r = int(start_color[0] + (next_color[0] - start_color[0]) * progress)
+                g = int(start_color[1] + (next_color[1] - start_color[1]) * progress)
+                b = int(start_color[2] + (next_color[2] - start_color[2]) * progress)
+
+                for device in target_devices:
+                    if device['device_type'] in ['rgb', 'rgbw'] and len(device['values']) >= 3:
+                        device['values'][0] = r
+                        device['values'][1] = g
+                        device['values'][2] = b
+                        send_device_dmx(device)
+
+                await asyncio.sleep(delay)
+
+            color_idx = (color_idx + 1) % len(colors)
+
+
+effect_engine = EffectEngine()
+
+
+async def start_effect(effect_id: str, effect_type: str, target_ids: List[str],
+                       params: dict, is_group: bool = False):
+    """Startet einen Effekt"""
+    global active_effects
+
+    # Stoppe existierenden Effekt
+    if effect_id in active_effects:
+        active_effects[effect_id].cancel()
+
+    # Starte neuen Effekt
+    try:
+        if effect_type == 'strobe':
+            task = asyncio.create_task(
+                effect_engine.strobe(target_ids, params.get('speed', 0.1), is_group)
+            )
+        elif effect_type == 'rainbow':
+            task = asyncio.create_task(
+                effect_engine.rainbow(target_ids, params.get('speed', 0.05), is_group)
+            )
+        elif effect_type == 'chase':
+            task = asyncio.create_task(
+                effect_engine.chase(target_ids, params.get('speed', 0.2), is_group)
+            )
+        elif effect_type == 'pulse':
+            task = asyncio.create_task(
+                effect_engine.pulse(target_ids, params.get('speed', 0.02), is_group)
+            )
+        elif effect_type == 'color_fade':
+            colors = params.get('colors', [(255, 0, 0), (0, 255, 0), (0, 0, 255)])
+            task = asyncio.create_task(
+                effect_engine.color_fade(target_ids, colors, params.get('speed', 2.0), is_group)
+            )
+        else:
+            return False
+
+        active_effects[effect_id] = task
+        return True
+
+    except Exception as e:
+        print(f"Error starting effect: {e}")
+        return False
+
+
+async def stop_effect(effect_id: str):
+    """Stoppt einen Effekt"""
+    if effect_id in active_effects:
+        active_effects[effect_id].cancel()
+        del active_effects[effect_id]
+        return True
+    return False
 
 
 # Fade-Funktion
@@ -316,6 +585,231 @@ async def activate_scene(scene_id: str):
     return {"success": True, "fading": True}
 
 
+# Gruppen API
+@app.get("/api/groups")
+async def get_groups():
+    """Gibt alle Gruppen zurück"""
+    return {"groups": groups}
+
+
+@app.post("/api/groups")
+async def add_group(group: dict):
+    """Erstellt neue Gruppe"""
+    group['id'] = f"group_{int(time.time() * 1000)}"
+    group['device_ids'] = group.get('device_ids', [])
+
+    groups.append(group)
+    save_groups()
+
+    await broadcast_update({
+        'type': 'groups_updated',
+        'groups': groups
+    })
+
+    return {"success": True, "group": group}
+
+
+@app.put("/api/groups/{group_id}")
+async def update_group(group_id: str, data: dict):
+    """Aktualisiert Gruppe"""
+    group = next((g for g in groups if g['id'] == group_id), None)
+
+    if group:
+        group.update(data)
+        save_groups()
+
+        await broadcast_update({
+            'type': 'groups_updated',
+            'groups': groups
+        })
+
+        return {"success": True, "group": group}
+
+    return {"success": False}
+
+
+@app.delete("/api/groups/{group_id}")
+async def delete_group(group_id: str):
+    """Löscht Gruppe"""
+    global groups
+    groups = [g for g in groups if g['id'] != group_id]
+    save_groups()
+
+    await broadcast_update({
+        'type': 'groups_updated',
+        'groups': groups
+    })
+
+    return {"success": True}
+
+
+@app.post("/api/groups/{group_id}/values")
+async def update_group_values(group_id: str, data: dict):
+    """Setzt Werte für alle Geräte in einer Gruppe"""
+    set_group_values(group_id, data)
+
+    await broadcast_update({
+        'type': 'devices_updated',
+        'devices': devices
+    })
+
+    return {"success": True}
+
+
+# Effekte API
+@app.get("/api/effects")
+async def get_effects():
+    """Gibt verfügbare Effekttypen und gespeicherte Effekte zurück"""
+    return {
+        "effects": effects,
+        "available_types": [
+            {"id": "strobe", "name": "Stroboskop", "params": ["speed"]},
+            {"id": "rainbow", "name": "Regenbogen", "params": ["speed"]},
+            {"id": "chase", "name": "Lauflicht", "params": ["speed"]},
+            {"id": "pulse", "name": "Pulsieren", "params": ["speed"]},
+            {"id": "color_fade", "name": "Farbwechsel", "params": ["speed", "colors"]}
+        ]
+    }
+
+
+@app.post("/api/effects")
+async def create_effect(effect: dict):
+    """Erstellt und speichert Effekt"""
+    effect['id'] = f"effect_{int(time.time() * 1000)}"
+    effects.append(effect)
+    save_effects()
+
+    await broadcast_update({
+        'type': 'effects_updated',
+        'effects': effects
+    })
+
+    return {"success": True, "effect": effect}
+
+
+@app.post("/api/effects/{effect_id}/start")
+async def start_effect_endpoint(effect_id: str):
+    """Startet einen gespeicherten Effekt"""
+    effect = next((e for e in effects if e['id'] == effect_id), None)
+
+    if not effect:
+        return {"success": False, "error": "Effect not found"}
+
+    success = await start_effect(
+        effect_id,
+        effect['type'],
+        effect.get('target_ids', []),
+        effect.get('params', {}),
+        effect.get('is_group', False)
+    )
+
+    return {"success": success}
+
+
+@app.post("/api/effects/{effect_id}/stop")
+async def stop_effect_endpoint(effect_id: str):
+    """Stoppt einen laufenden Effekt"""
+    success = await stop_effect(effect_id)
+    return {"success": success}
+
+
+@app.delete("/api/effects/{effect_id}")
+async def delete_effect(effect_id: str):
+    """Löscht Effekt"""
+    global effects
+
+    # Stoppe Effekt falls aktiv
+    await stop_effect(effect_id)
+
+    effects = [e for e in effects if e['id'] != effect_id]
+    save_effects()
+
+    await broadcast_update({
+        'type': 'effects_updated',
+        'effects': effects
+    })
+
+    return {"success": True}
+
+
+# Companion API (für Stream Deck Integration)
+@app.get("/api/companion/actions")
+async def get_companion_actions():
+    """Gibt alle verfügbaren Aktionen für Companion zurück"""
+    actions = []
+
+    # Szenen-Aktionen
+    for scene in scenes:
+        actions.append({
+            "id": f"scene_{scene['id']}",
+            "type": "scene",
+            "name": f"Szene: {scene['name']}",
+            "color": scene.get('color', 'blue')
+        })
+
+    # Gruppen-Aktionen
+    for group in groups:
+        actions.append({
+            "id": f"group_{group['id']}",
+            "type": "group",
+            "name": f"Gruppe: {group['name']}",
+            "actions": ["on", "off", "toggle"]
+        })
+
+    # Effekt-Aktionen
+    for effect in effects:
+        actions.append({
+            "id": f"effect_{effect['id']}",
+            "type": "effect",
+            "name": f"Effekt: {effect['name']}",
+            "effect_type": effect['type']
+        })
+
+    return {"actions": actions}
+
+
+@app.post("/api/companion/trigger")
+async def trigger_companion_action(data: dict):
+    """Führt eine Companion-Aktion aus"""
+    action_type = data.get('type')
+    action_id = data.get('id')
+    params = data.get('params', {})
+
+    if action_type == 'scene':
+        scene_id = action_id.replace('scene_', '')
+        await activate_scene(scene_id)
+        return {"success": True}
+
+    elif action_type == 'group':
+        group_id = action_id.replace('group_', '')
+        action = params.get('action', 'toggle')
+
+        if action == 'on':
+            set_group_values(group_id, {'intensity': 255})
+        elif action == 'off':
+            set_group_values(group_id, {'intensity': 0})
+        elif action == 'toggle':
+            # Toggle basierend auf erstem Gerät
+            group_devices = get_group_devices(group_id)
+            if group_devices:
+                current = group_devices[0]['values'][0]
+                new_val = 0 if current > 0 else 255
+                set_group_values(group_id, {'intensity': new_val})
+
+        await broadcast_update({'type': 'devices_updated', 'devices': devices})
+        return {"success": True}
+
+    elif action_type == 'effect':
+        effect_id = action_id.replace('effect_', '')
+        if params.get('stop'):
+            await stop_effect_endpoint(effect_id)
+        else:
+            await start_effect_endpoint(effect_id)
+        return {"success": True}
+
+    return {"success": False, "error": "Unknown action type"}
+
+
 # WebSocket für Echtzeit-Updates
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
@@ -326,7 +820,9 @@ async def websocket_endpoint(websocket: WebSocket):
     await websocket.send_json({
         'type': 'initial_data',
         'devices': devices,
-        'scenes': scenes
+        'scenes': scenes,
+        'groups': groups,
+        'effects': effects
     })
     
     try:
