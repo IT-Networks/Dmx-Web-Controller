@@ -41,6 +41,7 @@ CONFIG_FILE = DATA_DIR / "dmx_config.json"
 SCENES_FILE = DATA_DIR / "dmx_scenes.json"
 GROUPS_FILE = DATA_DIR / "dmx_groups.json"
 EFFECTS_FILE = DATA_DIR / "dmx_effects.json"
+SEQUENCES_FILE = DATA_DIR / "dmx_sequences.json"
 
 # Mount static files
 app.mount("/static", StaticFiles(directory=str(FRONTEND_DIR)), name="static")
@@ -51,9 +52,18 @@ scenes = []
 groups = []
 effects = []
 fixtures = []
+sequences = []  # Timeline sequences
 connected_clients: List[WebSocket] = []
 is_fading = False
 active_effects: Dict[str, asyncio.Task] = {}  # effect_id -> Task
+active_sequences: Dict[str, asyncio.Task] = {}  # sequence_id -> Task
+current_audio_data: Dict[str, float] = {  # Current audio levels from clients
+    'bass': 0.0,
+    'mid': 0.0,
+    'high': 0.0,
+    'overall': 0.0,
+    'peak': 0
+}
 
 
 class ArtNetController:
@@ -108,8 +118,8 @@ async def broadcast_update(data: dict):
 
 # Daten laden/speichern
 def load_data():
-    """Lädt Geräte, Szenen, Gruppen, Effekte und Fixtures"""
-    global devices, scenes, groups, effects, fixtures
+    """Lädt Geräte, Szenen, Gruppen, Effekte, Sequences und Fixtures"""
+    global devices, scenes, groups, effects, sequences, fixtures
 
     if CONFIG_FILE.exists():
         with open(CONFIG_FILE, 'r') as f:
@@ -126,6 +136,10 @@ def load_data():
     if EFFECTS_FILE.exists():
         with open(EFFECTS_FILE, 'r') as f:
             effects = json.load(f)
+
+    if SEQUENCES_FILE.exists():
+        with open(SEQUENCES_FILE, 'r') as f:
+            sequences = json.load(f)
 
     # Load fixture library
     fixtures_file = BASE_DIR / "backend" / "fixtures.json"
@@ -157,6 +171,12 @@ def save_effects():
     """Speichert Effekte"""
     with open(EFFECTS_FILE, 'w') as f:
         json.dump(effects, f, indent=2)
+
+
+def save_sequences():
+    """Speichert Sequences"""
+    with open(SEQUENCES_FILE, 'w') as f:
+        json.dump(sequences, f, indent=2)
 
 
 # DMX Senden
@@ -359,6 +379,264 @@ class EffectEngine:
 
             color_idx = (color_idx + 1) % len(colors)
 
+    @staticmethod
+    async def sound_reactive(target_ids: List[str], mode: str = 'intensity',
+                            frequency_band: str = 'overall', sensitivity: float = 1.0,
+                            is_group: bool = False):
+        """Sound-reaktiver Effekt"""
+        global current_audio_data
+        import colorsys
+
+        last_trigger = 0
+        flash_duration = 0.05
+
+        while True:
+            target_devices = []
+            if is_group:
+                for group_id in target_ids:
+                    target_devices.extend(get_group_devices(group_id))
+            else:
+                target_devices = [d for d in devices if d['id'] in target_ids]
+
+            # Get audio level for selected frequency band
+            audio_level = current_audio_data.get(frequency_band, 0.0)
+            adjusted_level = min(1.0, audio_level * sensitivity)
+
+            if mode == 'flash':
+                # Flash on beat detection (simple threshold)
+                threshold = 0.7 / sensitivity
+                if audio_level > threshold and (asyncio.get_event_loop().time() - last_trigger) > 0.1:
+                    for device in target_devices:
+                        for i in range(len(device['values'])):
+                            device['values'][i] = 255
+                        send_device_dmx(device)
+
+                    last_trigger = asyncio.get_event_loop().time()
+                    await asyncio.sleep(flash_duration)
+
+                    # Turn off
+                    for device in target_devices:
+                        for i in range(len(device['values'])):
+                            device['values'][i] = 0
+                        send_device_dmx(device)
+                else:
+                    await asyncio.sleep(0.02)
+
+            elif mode == 'intensity':
+                # Map audio level to brightness
+                brightness = int(adjusted_level * 255)
+
+                for device in target_devices:
+                    for i in range(len(device['values'])):
+                        device['values'][i] = brightness
+                    send_device_dmx(device)
+
+                await asyncio.sleep(0.02)
+
+            elif mode == 'color':
+                # Map audio level to color hue
+                hue = adjusted_level * 270  # 0-270 degrees (blue to red)
+                r, g, b = colorsys.hsv_to_rgb(hue / 360, 1.0, 1.0)
+
+                for device in target_devices:
+                    if device['device_type'] in ['rgb', 'rgbw'] and len(device['values']) >= 3:
+                        device['values'][0] = int(r * 255)
+                        device['values'][1] = int(g * 255)
+                        device['values'][2] = int(b * 255)
+                        send_device_dmx(device)
+
+                await asyncio.sleep(0.02)
+
+    @staticmethod
+    async def fire(target_ids: List[str], speed: float = 0.05, intensity: float = 1.0, is_group: bool = False):
+        """Flackerndes Feuer-Effekt (Orange/Rot)"""
+        import random
+
+        while True:
+            target_devices = []
+            if is_group:
+                for group_id in target_ids:
+                    target_devices.extend(get_group_devices(group_id))
+            else:
+                target_devices = [d for d in devices if d['id'] in target_ids]
+
+            for device in target_devices:
+                # Random flicker with orange/red tones
+                base_red = int(255 * intensity)
+                base_green = int(100 * intensity * random.uniform(0.3, 0.7))
+                base_blue = 0
+
+                # Add flicker
+                flicker = random.uniform(0.7, 1.0)
+                red = int(base_red * flicker)
+                green = int(base_green * flicker)
+
+                if device['device_type'] in ['rgb', 'rgbw'] and len(device['values']) >= 3:
+                    device['values'][0] = red
+                    device['values'][1] = green
+                    device['values'][2] = base_blue
+                elif device['device_type'] == 'dimmer':
+                    device['values'][0] = red
+
+                send_device_dmx(device)
+
+            await asyncio.sleep(speed)
+
+    @staticmethod
+    async def lightning(target_ids: List[str], min_delay: float = 0.5, max_delay: float = 3.0, is_group: bool = False):
+        """Zufällige Blitz-Effekte"""
+        import random
+
+        while True:
+            target_devices = []
+            if is_group:
+                for group_id in target_ids:
+                    target_devices.extend(get_group_devices(group_id))
+            else:
+                target_devices = [d for d in devices if d['id'] in target_ids]
+
+            # Random lightning strike
+            flash_count = random.randint(1, 3)
+
+            for _ in range(flash_count):
+                # Flash on
+                for device in target_devices:
+                    for i in range(len(device['values'])):
+                        device['values'][i] = 255
+                    send_device_dmx(device)
+
+                await asyncio.sleep(random.uniform(0.03, 0.08))
+
+                # Flash off
+                for device in target_devices:
+                    for i in range(len(device['values'])):
+                        device['values'][i] = 0
+                    send_device_dmx(device)
+
+                if flash_count > 1:
+                    await asyncio.sleep(random.uniform(0.05, 0.15))
+
+            # Wait for next lightning
+            await asyncio.sleep(random.uniform(min_delay, max_delay))
+
+    @staticmethod
+    async def scanner(target_ids: List[str], speed: float = 0.1, range_degrees: int = 180, is_group: bool = False):
+        """Scanner-Effekt für Moving Heads (Pan/Tilt Sweep)"""
+        direction = 1
+        position = 0
+
+        while True:
+            target_devices = []
+            if is_group:
+                for group_id in target_ids:
+                    target_devices.extend(get_group_devices(group_id))
+            else:
+                target_devices = [d for d in devices if d['id'] in target_ids]
+
+            # Calculate pan position (0-255)
+            pan_value = int((position / range_degrees) * 255)
+
+            for device in target_devices:
+                # Set pan if available
+                if len(device['values']) > 0:
+                    device['values'][0] = pan_value
+
+                # Keep light on
+                if len(device['values']) > 5:
+                    device['values'][5] = 255  # Dimmer
+
+                send_device_dmx(device)
+
+            # Update position
+            position += direction * 5
+            if position >= range_degrees:
+                position = range_degrees
+                direction = -1
+            elif position <= 0:
+                position = 0
+                direction = 1
+
+            await asyncio.sleep(speed)
+
+    @staticmethod
+    async def matrix(target_ids: List[str], speed: float = 0.2, pattern: str = 'wave', is_group: bool = False):
+        """Matrix-Effekt für Grid-Arrangements"""
+        import math
+        frame = 0
+
+        while True:
+            target_devices = []
+            if is_group:
+                for group_id in target_ids:
+                    target_devices.extend(get_group_devices(group_id))
+            else:
+                target_devices = [d for d in devices if d['id'] in target_ids]
+
+            num_devices = len(target_devices)
+            if num_devices == 0:
+                await asyncio.sleep(speed)
+                continue
+
+            # Calculate grid dimensions (approximate square)
+            cols = int(math.sqrt(num_devices))
+            rows = (num_devices + cols - 1) // cols
+
+            for idx, device in enumerate(target_devices):
+                x = idx % cols
+                y = idx // cols
+
+                if pattern == 'wave':
+                    # Horizontal wave
+                    intensity = (math.sin(frame * 0.1 + x * 0.5) + 1) / 2
+                elif pattern == 'circle':
+                    # Circular pattern
+                    center_x = cols / 2
+                    center_y = rows / 2
+                    distance = math.sqrt((x - center_x) ** 2 + (y - center_y) ** 2)
+                    intensity = (math.sin(frame * 0.2 - distance * 0.5) + 1) / 2
+                else:
+                    # Checkerboard
+                    intensity = 1.0 if (x + y + frame // 5) % 2 == 0 else 0.0
+
+                brightness = int(intensity * 255)
+
+                for i in range(len(device['values'])):
+                    device['values'][i] = brightness
+                send_device_dmx(device)
+
+            frame += 1
+            await asyncio.sleep(speed)
+
+    @staticmethod
+    async def twinkle(target_ids: List[str], speed: float = 0.1, density: float = 0.3, is_group: bool = False):
+        """Glitzer-Effekt mit zufälligen Blitzen"""
+        import random
+
+        while True:
+            target_devices = []
+            if is_group:
+                for group_id in target_ids:
+                    target_devices.extend(get_group_devices(group_id))
+            else:
+                target_devices = [d for d in devices if d['id'] in target_ids]
+
+            for device in target_devices:
+                # Random chance to twinkle
+                if random.random() < density:
+                    # Bright flash
+                    brightness = random.randint(200, 255)
+                    for i in range(len(device['values'])):
+                        device['values'][i] = brightness
+                else:
+                    # Dim or off
+                    brightness = random.randint(0, 50)
+                    for i in range(len(device['values'])):
+                        device['values'][i] = brightness
+
+                send_device_dmx(device)
+
+            await asyncio.sleep(speed)
+
 
 effect_engine = EffectEngine()
 
@@ -395,6 +673,61 @@ async def start_effect(effect_id: str, effect_type: str, target_ids: List[str],
             task = asyncio.create_task(
                 effect_engine.color_fade(target_ids, colors, params.get('speed', 2.0), is_group)
             )
+        elif effect_type == 'sound_reactive':
+            task = asyncio.create_task(
+                effect_engine.sound_reactive(
+                    target_ids,
+                    mode=params.get('mode', 'intensity'),
+                    frequency_band=params.get('frequency_band', 'overall'),
+                    sensitivity=params.get('sensitivity', 1.0),
+                    is_group=is_group
+                )
+            )
+        elif effect_type == 'fire':
+            task = asyncio.create_task(
+                effect_engine.fire(
+                    target_ids,
+                    speed=params.get('speed', 0.05),
+                    intensity=params.get('intensity', 1.0),
+                    is_group=is_group
+                )
+            )
+        elif effect_type == 'lightning':
+            task = asyncio.create_task(
+                effect_engine.lightning(
+                    target_ids,
+                    min_delay=params.get('min_delay', 0.5),
+                    max_delay=params.get('max_delay', 3.0),
+                    is_group=is_group
+                )
+            )
+        elif effect_type == 'scanner':
+            task = asyncio.create_task(
+                effect_engine.scanner(
+                    target_ids,
+                    speed=params.get('speed', 0.1),
+                    range_degrees=params.get('range', 180),
+                    is_group=is_group
+                )
+            )
+        elif effect_type == 'matrix':
+            task = asyncio.create_task(
+                effect_engine.matrix(
+                    target_ids,
+                    speed=params.get('speed', 0.2),
+                    pattern=params.get('pattern', 'wave'),
+                    is_group=is_group
+                )
+            )
+        elif effect_type == 'twinkle':
+            task = asyncio.create_task(
+                effect_engine.twinkle(
+                    target_ids,
+                    speed=params.get('speed', 0.1),
+                    density=params.get('density', 0.3),
+                    is_group=is_group
+                )
+            )
         else:
             return False
 
@@ -411,6 +744,91 @@ async def stop_effect(effect_id: str):
     if effect_id in active_effects:
         active_effects[effect_id].cancel()
         del active_effects[effect_id]
+        return True
+    return False
+
+
+# Timeline/Sequence Playback Engine
+async def play_sequence(sequence_id: str, loop: bool = False):
+    """Spielt eine Sequence ab"""
+    sequence = next((s for s in sequences if s['id'] == sequence_id), None)
+    if not sequence:
+        return False
+
+    try:
+        while True:
+            for step in sequence.get('steps', []):
+                step_type = step.get('type')
+                duration = step.get('duration', 0) / 1000  # ms to seconds
+
+                if step_type == 'scene':
+                    # Activate scene
+                    scene_id = step.get('target_id')
+                    await activate_scene(scene_id)
+
+                elif step_type == 'effect':
+                    # Start effect
+                    effect_id = step.get('target_id')
+                    effect = next((e for e in effects if e['id'] == effect_id), None)
+                    if effect:
+                        await start_effect(
+                            f"{effect_id}_seq",
+                            effect['type'],
+                            effect.get('target_ids', []),
+                            effect.get('params', {}),
+                            effect.get('is_group', False)
+                        )
+
+                elif step_type == 'wait':
+                    # Just wait
+                    pass
+
+                # Wait for step duration
+                await asyncio.sleep(duration)
+
+                # Stop effect after duration if it was an effect
+                if step_type == 'effect':
+                    effect_id = step.get('target_id')
+                    await stop_effect(f"{effect_id}_seq")
+
+            # Break if not looping
+            if not loop:
+                break
+
+        return True
+
+    except asyncio.CancelledError:
+        # Clean up on cancel
+        return False
+
+
+async def start_sequence(sequence_id: str):
+    """Startet eine Sequence"""
+    global active_sequences
+
+    # Stop existing sequence
+    if sequence_id in active_sequences:
+        active_sequences[sequence_id].cancel()
+
+    # Get sequence config
+    sequence = next((s for s in sequences if s['id'] == sequence_id), None)
+    if not sequence:
+        return False
+
+    # Start sequence playback
+    task = asyncio.create_task(
+        play_sequence(sequence_id, sequence.get('loop', False))
+    )
+    active_sequences[sequence_id] = task
+
+    return True
+
+
+async def stop_sequence(sequence_id: str):
+    """Stoppt eine Sequence"""
+    if sequence_id in active_sequences:
+        active_sequences[sequence_id].cancel()
+        del active_sequences[sequence_id]
         return True
     return False
 
@@ -675,7 +1093,12 @@ async def get_effects():
             {"id": "rainbow", "name": "Regenbogen", "params": ["speed"]},
             {"id": "chase", "name": "Lauflicht", "params": ["speed"]},
             {"id": "pulse", "name": "Pulsieren", "params": ["speed"]},
-            {"id": "color_fade", "name": "Farbwechsel", "params": ["speed", "colors"]}
+            {"id": "color_fade", "name": "Farbwechsel", "params": ["speed", "colors"]},
+            {"id": "fire", "name": "Feuer", "params": ["speed", "intensity"]},
+            {"id": "lightning", "name": "Blitz", "params": ["min_delay", "max_delay"]},
+            {"id": "scanner", "name": "Scanner", "params": ["speed", "range"]},
+            {"id": "matrix", "name": "Matrix", "params": ["speed", "pattern"]},
+            {"id": "twinkle", "name": "Funkeln", "params": ["speed", "density"]}
         ]
     }
 
@@ -703,11 +1126,16 @@ async def start_effect_endpoint(effect_id: str):
     if not effect:
         return {"success": False, "error": "Effect not found"}
 
+    # Merge sound_config into params for sound_reactive effects
+    params = effect.get('params', {}).copy()
+    if effect.get('sound_reactive') and effect.get('sound_config'):
+        params.update(effect['sound_config'])
+
     success = await start_effect(
         effect_id,
         effect['type'],
         effect.get('target_ids', []),
-        effect.get('params', {}),
+        params,
         effect.get('is_group', False)
     )
 
@@ -735,6 +1163,81 @@ async def delete_effect(effect_id: str):
     await broadcast_update({
         'type': 'effects_updated',
         'effects': effects
+    })
+
+    return {"success": True}
+
+
+# Sequence/Timeline API
+@app.get("/api/sequences")
+async def get_sequences():
+    """Gibt alle Sequences zurück"""
+    return {"sequences": sequences}
+
+
+@app.post("/api/sequences")
+async def create_sequence(sequence: dict):
+    """Erstellt eine neue Sequence"""
+    sequence['id'] = f"seq_{int(time.time() * 1000)}"
+    sequences.append(sequence)
+    save_sequences()
+
+    await broadcast_update({
+        'type': 'sequences_updated',
+        'sequences': sequences
+    })
+
+    return {"success": True, "sequence": sequence}
+
+
+@app.put("/api/sequences/{sequence_id}")
+async def update_sequence(sequence_id: str, sequence: dict):
+    """Aktualisiert eine Sequence"""
+    global sequences
+
+    idx = next((i for i, s in enumerate(sequences) if s['id'] == sequence_id), None)
+    if idx is not None:
+        sequences[idx] = {**sequences[idx], **sequence, 'id': sequence_id}
+        save_sequences()
+
+        await broadcast_update({
+            'type': 'sequences_updated',
+            'sequences': sequences
+        })
+
+        return {"success": True}
+
+    return {"success": False, "error": "Sequence not found"}
+
+
+@app.post("/api/sequences/{sequence_id}/play")
+async def play_sequence_endpoint(sequence_id: str):
+    """Startet eine Sequence"""
+    success = await start_sequence(sequence_id)
+    return {"success": success}
+
+
+@app.post("/api/sequences/{sequence_id}/stop")
+async def stop_sequence_endpoint(sequence_id: str):
+    """Stoppt eine Sequence"""
+    success = await stop_sequence(sequence_id)
+    return {"success": success}
+
+
+@app.delete("/api/sequences/{sequence_id}")
+async def delete_sequence(sequence_id: str):
+    """Löscht eine Sequence"""
+    global sequences
+
+    # Stop sequence if active
+    await stop_sequence(sequence_id)
+
+    sequences = [s for s in sequences if s['id'] != sequence_id]
+    save_sequences()
+
+    await broadcast_update({
+        'type': 'sequences_updated',
+        'sequences': sequences
     })
 
     return {"success": True}
@@ -863,7 +1366,8 @@ async def websocket_endpoint(websocket: WebSocket):
         'devices': devices,
         'scenes': scenes,
         'groups': groups,
-        'effects': effects
+        'effects': effects,
+        'sequences': sequences
     })
     
     try:
@@ -878,13 +1382,25 @@ async def websocket_endpoint(websocket: WebSocket):
                     device['values'][channel_idx] = value
                     send_device_dmx(device)
                     save_devices()
-                    
+
                     # Broadcast an alle anderen Clients
                     await broadcast_update({
                         'type': 'device_values_updated',
                         'device_id': data['device_id'],
                         'values': device['values']
                     })
+
+            elif data['type'] == 'audio_data':
+                # Update global audio data from client
+                global current_audio_data
+                audio_info = data.get('data', {})
+                current_audio_data.update({
+                    'bass': audio_info.get('bass', 0.0),
+                    'mid': audio_info.get('mid', 0.0),
+                    'high': audio_info.get('high', 0.0),
+                    'overall': audio_info.get('overall', 0.0),
+                    'peak': audio_info.get('peak', 0)
+                })
     
     except WebSocketDisconnect:
         connected_clients.remove(websocket)

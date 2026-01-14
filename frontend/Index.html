@@ -53,6 +53,15 @@
                     </svg>
                     <span>Effekte</span>
                 </button>
+
+                <button class="menu-item" data-tab="sequences" onclick="app.switchTab('sequences')">
+                    <svg width="20" height="20" viewBox="0 0 20 20">
+                        <rect x="2" y="7" width="4" height="6" fill="currentColor"/>
+                        <rect x="8" y="4" width="4" height="12" fill="currentColor"/>
+                        <rect x="14" y="6" width="4" height="8" fill="currentColor"/>
+                    </svg>
+                    <span>Timeline</span>
+                </button>
             </div>
 
             <div class="sidebar-footer">
@@ -154,7 +163,41 @@
                                 <span class="effect-icon">🎨</span>
                                 <span>Farbwechsel</span>
                             </button>
+                            <button class="effect-template" onclick="app.createEffect('fire')">
+                                <span class="effect-icon">🔥</span>
+                                <span>Feuer</span>
+                            </button>
+                            <button class="effect-template" onclick="app.createEffect('lightning')">
+                                <span class="effect-icon">⚡️</span>
+                                <span>Blitz</span>
+                            </button>
+                            <button class="effect-template" onclick="app.createEffect('scanner')">
+                                <span class="effect-icon">🔦</span>
+                                <span>Scanner</span>
+                            </button>
+                            <button class="effect-template" onclick="app.createEffect('matrix')">
+                                <span class="effect-icon">📊</span>
+                                <span>Matrix</span>
+                            </button>
+                            <button class="effect-template" onclick="app.createEffect('twinkle')">
+                                <span class="effect-icon">✨</span>
+                                <span>Glitzer</span>
+                            </button>
                         </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="tab-content" id="sequencesTab">
+                <div class="content-grid" id="sequencesContainer">
+                    <div class="empty-state">
+                        <svg width="64" height="64" viewBox="0 0 64 64">
+                            <rect x="8" y="24" width="12" height="16" fill="none" stroke="currentColor" stroke-width="2" opacity="0.3"/>
+                            <rect x="26" y="16" width="12" height="32" fill="none" stroke="currentColor" stroke-width="2" opacity="0.3"/>
+                            <rect x="44" y="20" width="12" height="24" fill="none" stroke="currentColor" stroke-width="2" opacity="0.3"/>
+                        </svg>
+                        <h3>Keine Timeline vorhanden</h3>
+                        <p>Erstelle eine Timeline-Sequence für automatisierte Abläufe</p>
                     </div>
                 </div>
             </div>
@@ -277,20 +320,216 @@
         </div>
     </div>
 
-    <!-- Modal: Effekt konfigurieren -->
-    <div class="modal" id="configEffectModal">
-        <div class="modal-backdrop" onclick="app.closeModal('configEffectModal')"></div>
-        <div class="modal-dialog">
+    <!-- Modal: Effekt Editor (Visueller Editor) -->
+    <div class="modal modal-large" id="effectEditorModal">
+        <div class="modal-backdrop" onclick="app.closeEffectEditor()"></div>
+        <div class="modal-dialog modal-effect-editor">
             <div class="modal-header">
-                <h2>Effekt konfigurieren</h2>
-                <button class="modal-close" onclick="app.closeModal('configEffectModal')">×</button>
+                <h2 id="effectEditorTitle">Neuer Effekt</h2>
+                <button class="modal-close" onclick="app.closeEffectEditor()">×</button>
             </div>
-            <div class="modal-body" id="effectConfigBody">
-                <!-- Dynamisch gefüllt -->
+            <div class="modal-body">
+                <div class="effect-editor-layout">
+                    <!-- Left Panel: Configuration -->
+                    <div class="effect-editor-panel">
+                        <div class="form-group">
+                            <label>Effekt-Name</label>
+                            <input type="text" id="effectEditorName" placeholder="Mein Effekt" class="input">
+                        </div>
+
+                        <div class="form-group">
+                            <label>Effekt-Typ</label>
+                            <select id="effectEditorType" class="input" onchange="app.updateEffectEditorParams()">
+                                <option value="strobe">Stroboskop</option>
+                                <option value="rainbow">Regenbogen</option>
+                                <option value="chase">Lauflicht</option>
+                                <option value="pulse">Pulsieren</option>
+                                <option value="color_fade">Farbwechsel</option>
+                                <option value="fire">🔥 Feuer</option>
+                                <option value="lightning">⚡ Blitz</option>
+                                <option value="scanner">🔦 Scanner</option>
+                                <option value="matrix">📊 Matrix</option>
+                                <option value="twinkle">✨ Glitzer</option>
+                                <option value="sound_reactive">Sound-Reaktiv</option>
+                            </select>
+                        </div>
+
+                        <div class="form-group">
+                            <label>Ziel auswählen</label>
+                            <div class="target-selector">
+                                <div class="button-group mb-2">
+                                    <button class="btn-option active" data-target="devices" onclick="app.selectEffectTargetType('devices')">Geräte</button>
+                                    <button class="btn-option" data-target="groups" onclick="app.selectEffectTargetType('groups')">Gruppen</button>
+                                </div>
+                                <div id="effectTargetDevices" class="target-select-container">
+                                    <div class="device-select" id="effectDeviceSelect">
+                                        <!-- Dynamisch gefüllt -->
+                                    </div>
+                                </div>
+                                <div id="effectTargetGroups" class="target-select-container" style="display: none;">
+                                    <div class="device-select" id="effectGroupSelect">
+                                        <!-- Dynamisch gefüllt -->
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Dynamic Parameters -->
+                        <div id="effectEditorParams"></div>
+
+                        <!-- Sound Reactivity -->
+                        <div class="form-group">
+                            <label class="checkbox-label">
+                                <input type="checkbox" id="effectSoundReactive" onchange="app.toggleSoundReactive()">
+                                <span>Sound-Reaktiv</span>
+                            </label>
+                        </div>
+
+                        <div id="soundReactivityConfig" style="display: none;">
+                            <div class="form-group">
+                                <label>Frequenzbereich</label>
+                                <select id="soundFrequencyBand" class="input">
+                                    <option value="overall">Gesamter Pegel</option>
+                                    <option value="bass">Bass (20-250 Hz)</option>
+                                    <option value="mid">Mitten (250-2000 Hz)</option>
+                                    <option value="high">Höhen (2000-20000 Hz)</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label>Sound-Empfindlichkeit</label>
+                                <input type="range" id="soundSensitivity" min="0" max="100" value="50" class="slider">
+                                <div class="slider-value" id="soundSensitivityValue">50%</div>
+                            </div>
+                            <div class="form-group">
+                                <label>Parameter für Sound-Steuerung</label>
+                                <select id="soundControlParam" class="input">
+                                    <option value="speed">Geschwindigkeit</option>
+                                    <option value="intensity">Intensität</option>
+                                    <option value="both">Beides</option>
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Right Panel: Preview -->
+                    <div class="effect-editor-preview">
+                        <h3>Vorschau</h3>
+                        <div class="preview-container">
+                            <canvas id="effectPreviewCanvas" width="300" height="200"></canvas>
+                        </div>
+                        <div class="preview-controls">
+                            <button class="btn btn-secondary" onclick="app.previewEffect()">
+                                <span>▶</span> Vorschau
+                            </button>
+                            <button class="btn btn-secondary" onclick="app.stopPreviewEffect()">
+                                <span>⏹</span> Stop
+                            </button>
+                        </div>
+
+                        <!-- Sound Visualizer -->
+                        <div id="soundVisualizer" style="display: none;">
+                            <h4>Audio-Pegel</h4>
+                            <canvas id="soundVisualizerCanvas" width="300" height="100"></canvas>
+                            <div class="sound-levels">
+                                <div class="level-bar">
+                                    <span>Bass</span>
+                                    <div class="level-bar-bg"><div id="levelBass" class="level-bar-fill"></div></div>
+                                </div>
+                                <div class="level-bar">
+                                    <span>Mid</span>
+                                    <div class="level-bar-bg"><div id="levelMid" class="level-bar-fill"></div></div>
+                                </div>
+                                <div class="level-bar">
+                                    <span>High</span>
+                                    <div class="level-bar-bg"><div id="levelHigh" class="level-bar-fill"></div></div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
             </div>
             <div class="modal-footer">
-                <button class="btn btn-secondary" onclick="app.closeModal('configEffectModal')">Abbrechen</button>
-                <button class="btn btn-primary" onclick="app.saveEffect()">Speichern</button>
+                <button class="btn btn-secondary" onclick="app.closeEffectEditor()">Abbrechen</button>
+                <button class="btn btn-primary" onclick="app.saveEffectFromEditor()">Speichern & Starten</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal: Sequence Editor -->
+    <div class="modal modal-large" id="sequenceEditorModal">
+        <div class="modal-backdrop" onclick="app.closeSequenceEditor()"></div>
+        <div class="modal-dialog modal-sequence-editor">
+            <div class="modal-header">
+                <h2 id="sequenceEditorTitle">Neue Timeline</h2>
+                <button class="modal-close" onclick="app.closeSequenceEditor()">×</button>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label>Timeline-Name</label>
+                    <input type="text" id="sequenceName" placeholder="z.B. Gottesdienst Ablauf" class="input">
+                </div>
+
+                <div class="form-group">
+                    <label class="checkbox-label">
+                        <input type="checkbox" id="sequenceLoop">
+                        <span>Endlos wiederholen</span>
+                    </label>
+                </div>
+
+                <div class="form-group">
+                    <label>Steps</label>
+                    <div class="sequence-steps" id="sequenceSteps">
+                        <!-- Steps werden hier dynamisch eingefügt -->
+                    </div>
+                    <div class="step-actions">
+                        <button class="btn btn-secondary" onclick="app.addSequenceStep('scene')">
+                            <svg width="16" height="16" viewBox="0 0 16 16">
+                                <path d="M8 2 L8 14 M2 8 L14 8" stroke="currentColor" stroke-width="2"/>
+                            </svg>
+                            Szene hinzufügen
+                        </button>
+                        <button class="btn btn-secondary" onclick="app.addSequenceStep('effect')">
+                            <svg width="16" height="16" viewBox="0 0 16 16">
+                                <path d="M8 2 L8 14 M2 8 L14 8" stroke="currentColor" stroke-width="2"/>
+                            </svg>
+                            Effekt hinzufügen
+                        </button>
+                        <button class="btn btn-secondary" onclick="app.addSequenceStep('wait')">
+                            <svg width="16" height="16" viewBox="0 0 16 16">
+                                <path d="M8 2 L8 14 M2 8 L14 8" stroke="currentColor" stroke-width="2"/>
+                            </svg>
+                            Pause hinzufügen
+                        </button>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="app.closeSequenceEditor()">Abbrechen</button>
+                <button class="btn btn-primary" onclick="app.saveSequence()">Speichern</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Sound Control Panel -->
+    <div class="sound-control-panel" id="soundControlPanel">
+        <div class="sound-panel-header">
+            <h3>🎵 Audio Control</h3>
+            <button class="btn-icon" onclick="app.toggleSoundPanel()">−</button>
+        </div>
+        <div class="sound-panel-body">
+            <div class="sound-status">
+                <span id="soundStatus">Inaktiv</span>
+            </div>
+            <button class="btn btn-primary btn-block" id="startSoundBtn" onclick="app.toggleSound()">
+                🎤 Audio aktivieren
+            </button>
+            <div id="soundLevelsDisplay" style="display: none;">
+                <div class="level-meter">
+                    <div class="level-meter-bar">
+                        <div id="soundLevelBar" class="level-meter-fill"></div>
+                    </div>
+                    <span id="soundLevelText">0%</span>
+                </div>
             </div>
         </div>
     </div>
@@ -298,6 +537,7 @@
     <!-- Toast Container -->
     <div class="toast-container" id="toastContainer"></div>
 
+    <script src="/static/audioAnalyzer.js"></script>
     <script src="/static/app.js"></script>
 </body>
 </html>
