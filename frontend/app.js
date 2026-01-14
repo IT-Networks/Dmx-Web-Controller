@@ -1488,6 +1488,503 @@ class DMXController {
             this.showToast('Fehler beim Löschen', 'error');
         }
     }
+
+    // ===== Visual Effect Designer =====
+    openVisualDesigner() {
+        this.designerMode = 'spot';
+        this.designerKeyframes = [];
+        this.currentKeyframeIndex = -1;
+        this.previewPlaying = false;
+        this.previewProgress = 0;
+
+        // Populate devices dropdown
+        const select = document.getElementById('customEffectDevices');
+        select.innerHTML = '';
+        this.devices.forEach(device => {
+            const option = document.createElement('option');
+            option.value = device.id;
+            option.textContent = device.name;
+            select.appendChild(option);
+        });
+
+        // Initialize timeline
+        this.initializeTimeline();
+
+        // Show modal
+        document.getElementById('visualDesignerModal').classList.add('active');
+
+        // Add default keyframes
+        this.designerKeyframes = [
+            { time: 0, values: { default: [255, 255, 255] }, easing: 'linear' },
+            { time: 100, values: { default: [255, 0, 0] }, easing: 'linear' }
+        ];
+        this.drawTimeline();
+    }
+
+    closeVisualDesigner() {
+        if (this.previewPlaying) {
+            this.stopPreview();
+        }
+        document.getElementById('visualDesignerModal').classList.remove('active');
+        this.designerKeyframes = [];
+        this.currentKeyframeIndex = -1;
+    }
+
+    setDesignerMode(mode) {
+        this.designerMode = mode;
+
+        // Update button states
+        document.querySelectorAll('[data-mode]').forEach(btn => {
+            btn.classList.remove('active');
+            if (btn.dataset.mode === mode) {
+                btn.classList.add('active');
+            }
+        });
+
+        // Show/hide appropriate editors
+        document.getElementById('spotKeyframeEditor').style.display = mode === 'spot' ? 'block' : 'none';
+        document.getElementById('stripKeyframeEditor').style.display = mode === 'strip' ? 'block' : 'none';
+    }
+
+    initializeTimeline() {
+        const canvas = document.getElementById('timelineCanvas');
+        const ctx = canvas.getContext('2d');
+
+        // Make canvas responsive
+        const container = canvas.parentElement;
+        canvas.width = container.offsetWidth - 32; // Subtract padding
+        canvas.height = 120;
+
+        // Click handler
+        canvas.addEventListener('click', (e) => {
+            const rect = canvas.getBoundingClientRect();
+            const x = e.clientX - rect.left;
+            const y = e.clientY - rect.top;
+
+            // Check if clicked on keyframe
+            for (let i = 0; i < this.designerKeyframes.length; i++) {
+                const kf = this.designerKeyframes[i];
+                const kfX = (kf.time / 100) * canvas.width;
+                const kfY = canvas.height / 2;
+
+                const distance = Math.sqrt((x - kfX) ** 2 + (y - kfY) ** 2);
+                if (distance < 10) {
+                    this.selectKeyframe(i);
+                    return;
+                }
+            }
+        });
+
+        this.drawTimeline();
+    }
+
+    drawTimeline() {
+        const canvas = document.getElementById('timelineCanvas');
+        if (!canvas) return;
+
+        const ctx = canvas.getContext('2d');
+        const width = canvas.width;
+        const height = canvas.height;
+
+        // Clear canvas
+        ctx.fillStyle = '#1e293b';
+        ctx.fillRect(0, 0, width, height);
+
+        // Draw grid lines
+        ctx.strokeStyle = '#334155';
+        ctx.lineWidth = 1;
+        for (let i = 0; i <= 10; i++) {
+            const x = (i / 10) * width;
+            ctx.beginPath();
+            ctx.moveTo(x, 0);
+            ctx.lineTo(x, height);
+            ctx.stroke();
+
+            // Draw time labels
+            ctx.fillStyle = '#94a3b8';
+            ctx.font = '10px sans-serif';
+            ctx.fillText(`${i * 10}%`, x + 2, 12);
+        }
+
+        // Draw center line
+        ctx.strokeStyle = '#475569';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(0, height / 2);
+        ctx.lineTo(width, height / 2);
+        ctx.stroke();
+
+        // Draw keyframe curve
+        if (this.designerKeyframes.length > 1) {
+            ctx.strokeStyle = '#3b82f6';
+            ctx.lineWidth = 3;
+            ctx.beginPath();
+
+            const sorted = [...this.designerKeyframes].sort((a, b) => a.time - b.time);
+            sorted.forEach((kf, i) => {
+                const x = (kf.time / 100) * width;
+                const y = height / 2;
+
+                if (i === 0) {
+                    ctx.moveTo(x, y);
+                } else {
+                    ctx.lineTo(x, y);
+                }
+            });
+            ctx.stroke();
+        }
+
+        // Draw keyframes
+        this.designerKeyframes.forEach((kf, index) => {
+            const x = (kf.time / 100) * width;
+            const y = height / 2;
+
+            ctx.fillStyle = index === this.currentKeyframeIndex ? '#3b82f6' : '#f59e0b';
+            ctx.beginPath();
+            ctx.arc(x, y, 6, 0, Math.PI * 2);
+            ctx.fill();
+
+            ctx.strokeStyle = '#0f172a';
+            ctx.lineWidth = 2;
+            ctx.stroke();
+        });
+    }
+
+    addKeyframe() {
+        const duration = parseFloat(document.getElementById('customEffectDuration').value) || 10;
+        const newTime = this.designerKeyframes.length > 0
+            ? Math.min(100, this.designerKeyframes[this.designerKeyframes.length - 1].time + 10)
+            : 50;
+
+        const newKeyframe = {
+            time: newTime,
+            values: { default: [255, 255, 255] },
+            easing: 'linear'
+        };
+
+        if (this.designerMode === 'strip') {
+            newKeyframe.pattern = { color: [255, 255, 255] };
+            newKeyframe.pattern_type = 'solid';
+        }
+
+        this.designerKeyframes.push(newKeyframe);
+        this.drawTimeline();
+        this.selectKeyframe(this.designerKeyframes.length - 1);
+        this.showToast('Keyframe hinzugefügt', 'success');
+    }
+
+    selectKeyframe(index) {
+        this.currentKeyframeIndex = index;
+        const kf = this.designerKeyframes[index];
+
+        // Show keyframe editor
+        document.getElementById('keyframeEditor').style.display = 'block';
+
+        if (this.designerMode === 'spot') {
+            // Populate spot keyframe editor
+            document.getElementById('kfPosition').value = kf.time;
+            document.getElementById('kfPositionValue').textContent = kf.time + '%';
+
+            const rgb = kf.values.default || [255, 255, 255];
+            document.getElementById('kfRed').value = rgb[0];
+            document.getElementById('kfGreen').value = rgb[1];
+            document.getElementById('kfBlue').value = rgb[2];
+
+            const hexColor = '#' + rgb.map(v => v.toString(16).padStart(2, '0')).join('');
+            document.getElementById('kfColor').value = hexColor;
+
+            document.getElementById('kfEasing').value = kf.easing || 'linear';
+
+            // Setup event listeners
+            const updateColor = () => {
+                const r = parseInt(document.getElementById('kfRed').value) || 0;
+                const g = parseInt(document.getElementById('kfGreen').value) || 0;
+                const b = parseInt(document.getElementById('kfBlue').value) || 0;
+                const hex = '#' + [r, g, b].map(v => v.toString(16).padStart(2, '0')).join('');
+                document.getElementById('kfColor').value = hex;
+            };
+
+            document.getElementById('kfRed').onchange = updateColor;
+            document.getElementById('kfGreen').onchange = updateColor;
+            document.getElementById('kfBlue').onchange = updateColor;
+
+            document.getElementById('kfColor').onchange = (e) => {
+                const hex = e.target.value;
+                const r = parseInt(hex.substr(1, 2), 16);
+                const g = parseInt(hex.substr(3, 2), 16);
+                const b = parseInt(hex.substr(5, 2), 16);
+                document.getElementById('kfRed').value = r;
+                document.getElementById('kfGreen').value = g;
+                document.getElementById('kfBlue').value = b;
+            };
+
+            document.getElementById('kfPosition').oninput = (e) => {
+                document.getElementById('kfPositionValue').textContent = e.target.value + '%';
+            };
+        } else {
+            // Populate strip keyframe editor
+            document.getElementById('stripKfPosition').value = kf.time;
+            document.getElementById('stripKfPositionValue').textContent = kf.time + '%';
+            document.getElementById('stripPattern').value = kf.pattern_type || 'solid';
+
+            this.updateStripPattern();
+
+            document.getElementById('stripKfPosition').oninput = (e) => {
+                document.getElementById('stripKfPositionValue').textContent = e.target.value + '%';
+            };
+        }
+
+        this.drawTimeline();
+    }
+
+    updateStripPattern() {
+        const patternType = document.getElementById('stripPattern').value;
+
+        // Hide all pattern settings
+        document.querySelectorAll('.pattern-settings').forEach(el => {
+            el.style.display = 'none';
+        });
+
+        // Show selected pattern settings
+        if (patternType === 'solid') {
+            document.getElementById('solidSettings').style.display = 'block';
+        } else if (patternType === 'gradient') {
+            document.getElementById('gradientSettings').style.display = 'block';
+        } else if (patternType === 'wave') {
+            document.getElementById('waveSettings').style.display = 'block';
+
+            // Setup event listeners
+            document.getElementById('waveLength').oninput = (e) => {
+                document.getElementById('waveLengthValue').textContent = e.target.value;
+            };
+            document.getElementById('waveAmplitude').oninput = (e) => {
+                document.getElementById('waveAmplitudeValue').textContent = e.target.value;
+            };
+        } else if (patternType === 'chase') {
+            document.getElementById('chaseSettings').style.display = 'block';
+
+            document.getElementById('chaseWidth').oninput = (e) => {
+                document.getElementById('chaseWidthValue').textContent = e.target.value;
+            };
+        }
+    }
+
+    saveCurrentKeyframe() {
+        if (this.currentKeyframeIndex < 0) return;
+
+        const kf = this.designerKeyframes[this.currentKeyframeIndex];
+
+        if (this.designerMode === 'spot') {
+            kf.time = parseFloat(document.getElementById('kfPosition').value);
+            kf.values = {
+                default: [
+                    parseInt(document.getElementById('kfRed').value) || 0,
+                    parseInt(document.getElementById('kfGreen').value) || 0,
+                    parseInt(document.getElementById('kfBlue').value) || 0
+                ]
+            };
+            kf.easing = document.getElementById('kfEasing').value;
+        } else {
+            kf.time = parseFloat(document.getElementById('stripKfPosition').value);
+            kf.pattern_type = document.getElementById('stripPattern').value;
+
+            if (kf.pattern_type === 'solid') {
+                const hex = document.getElementById('stripColor').value;
+                const r = parseInt(hex.substr(1, 2), 16);
+                const g = parseInt(hex.substr(3, 2), 16);
+                const b = parseInt(hex.substr(5, 2), 16);
+                kf.pattern = { color: [r, g, b] };
+            } else if (kf.pattern_type === 'gradient') {
+                const startHex = document.getElementById('gradientStart').value;
+                const endHex = document.getElementById('gradientEnd').value;
+                kf.pattern = {
+                    color: [
+                        parseInt(startHex.substr(1, 2), 16),
+                        parseInt(startHex.substr(3, 2), 16),
+                        parseInt(startHex.substr(5, 2), 16)
+                    ]
+                };
+                // Store end color in next keyframe pattern
+                const nextKf = this.designerKeyframes[this.currentKeyframeIndex + 1];
+                if (nextKf) {
+                    nextKf.pattern = {
+                        color: [
+                            parseInt(endHex.substr(1, 2), 16),
+                            parseInt(endHex.substr(3, 2), 16),
+                            parseInt(endHex.substr(5, 2), 16)
+                        ]
+                    };
+                }
+            } else if (kf.pattern_type === 'wave') {
+                kf.pattern = {
+                    wavelength: parseInt(document.getElementById('waveLength').value),
+                    amplitude: parseInt(document.getElementById('waveAmplitude').value)
+                };
+            } else if (kf.pattern_type === 'chase') {
+                kf.pattern = {
+                    width: parseInt(document.getElementById('chaseWidth').value)
+                };
+            }
+        }
+
+        this.drawTimeline();
+        this.showToast('Keyframe aktualisiert', 'success');
+    }
+
+    deleteCurrentKeyframe() {
+        if (this.currentKeyframeIndex < 0) return;
+
+        if (this.designerKeyframes.length <= 2) {
+            this.showToast('Mindestens 2 Keyframes erforderlich', 'error');
+            return;
+        }
+
+        this.designerKeyframes.splice(this.currentKeyframeIndex, 1);
+        this.currentKeyframeIndex = -1;
+        document.getElementById('keyframeEditor').style.display = 'none';
+        this.drawTimeline();
+        this.showToast('Keyframe gelöscht', 'success');
+    }
+
+    playPreview() {
+        if (this.previewPlaying) {
+            this.stopPreview();
+            return;
+        }
+
+        this.previewPlaying = true;
+        document.getElementById('playIcon').textContent = '⏸️';
+
+        const duration = parseFloat(document.getElementById('customEffectDuration').value) || 10;
+        const startTime = Date.now();
+
+        const animate = () => {
+            if (!this.previewPlaying) return;
+
+            const elapsed = (Date.now() - startTime) / 1000;
+            this.previewProgress = (elapsed % duration) / duration;
+
+            // Update scrubber
+            const canvas = document.getElementById('timelineCanvas');
+            const scrubber = document.getElementById('timelineScrubber');
+            if (canvas && scrubber) {
+                const x = this.previewProgress * canvas.width + 16; // Add container padding
+                scrubber.style.left = x + 'px';
+            }
+
+            // Update time display
+            document.getElementById('timelineTime').textContent = elapsed.toFixed(1) + 's';
+
+            this.previewAnimationFrame = requestAnimationFrame(animate);
+        };
+
+        animate();
+    }
+
+    stopPreview() {
+        this.previewPlaying = false;
+        document.getElementById('playIcon').textContent = '▶️';
+        if (this.previewAnimationFrame) {
+            cancelAnimationFrame(this.previewAnimationFrame);
+        }
+
+        // Reset scrubber
+        document.getElementById('timelineScrubber').style.left = '16px';
+        document.getElementById('timelineTime').textContent = '0.0s';
+    }
+
+    loadTemplate(templateName) {
+        switch (templateName) {
+            case 'fade':
+                this.designerKeyframes = [
+                    { time: 0, values: { default: [0, 0, 0] }, easing: 'linear' },
+                    { time: 50, values: { default: [255, 255, 255] }, easing: 'ease-in-out' },
+                    { time: 100, values: { default: [0, 0, 0] }, easing: 'linear' }
+                ];
+                break;
+            case 'pulse':
+                this.designerKeyframes = [
+                    { time: 0, values: { default: [50, 50, 50] }, easing: 'ease-in' },
+                    { time: 50, values: { default: [255, 255, 255] }, easing: 'ease-out' },
+                    { time: 100, values: { default: [50, 50, 50] }, easing: 'linear' }
+                ];
+                break;
+            case 'colorCycle':
+                this.designerKeyframes = [
+                    { time: 0, values: { default: [255, 0, 0] }, easing: 'linear' },
+                    { time: 33, values: { default: [0, 255, 0] }, easing: 'linear' },
+                    { time: 66, values: { default: [0, 0, 255] }, easing: 'linear' },
+                    { time: 100, values: { default: [255, 0, 0] }, easing: 'linear' }
+                ];
+                break;
+            case 'strobe':
+                this.designerKeyframes = [
+                    { time: 0, values: { default: [0, 0, 0] }, easing: 'linear' },
+                    { time: 10, values: { default: [255, 255, 255] }, easing: 'linear' },
+                    { time: 20, values: { default: [0, 0, 0] }, easing: 'linear' },
+                    { time: 30, values: { default: [255, 255, 255] }, easing: 'linear' },
+                    { time: 40, values: { default: [0, 0, 0] }, easing: 'linear' }
+                ];
+                break;
+        }
+
+        this.drawTimeline();
+        this.showToast(`Template "${templateName}" geladen`, 'success');
+    }
+
+    async saveCustomEffect() {
+        const name = document.getElementById('customEffectName').value.trim();
+        if (!name) {
+            this.showToast('Bitte Namen eingeben', 'error');
+            return;
+        }
+
+        const select = document.getElementById('customEffectDevices');
+        const selectedDevices = Array.from(select.selectedOptions).map(opt => opt.value);
+
+        if (selectedDevices.length === 0) {
+            this.showToast('Bitte mindestens ein Gerät auswählen', 'error');
+            return;
+        }
+
+        const duration = parseFloat(document.getElementById('customEffectDuration').value) || 10;
+
+        const effect = {
+            name: name,
+            type: 'custom',
+            target_ids: selectedDevices,
+            params: {
+                keyframes: this.designerKeyframes,
+                duration: duration,
+                mode: this.designerMode
+            },
+            is_group: false
+        };
+
+        try {
+            const response = await fetch('/api/effects', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(effect)
+            });
+
+            if (response.ok) {
+                this.showToast('Custom Effect erstellt', 'success');
+                this.closeVisualDesigner();
+
+                // Ask if user wants to start it immediately
+                if (confirm('Effekt jetzt starten?')) {
+                    const data = await response.json();
+                    if (data.effect && data.effect.id) {
+                        await this.startEffect(data.effect.id);
+                    }
+                }
+            }
+        } catch (error) {
+            console.error('Error creating custom effect:', error);
+            this.showToast('Fehler beim Erstellen', 'error');
+        }
+    }
 }
 
 const app = new DMXController();

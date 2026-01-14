@@ -160,7 +160,67 @@ python main.py
 
 ---
 
-### Schritt 6: Timeline erstellen (Automatische Abläufe)
+### Schritt 6: Eigene Effekte erstellen (Visual Effect Designer)
+
+Der Visual Effect Designer ermöglicht es dir, eigene keyframe-basierte Effekte zu erstellen!
+
+**Spot Mode - Für einzelne Lichter:**
+
+1. **Öffne den Designer**
+   - Gehe zum "Effekte"-Tab
+   - Klicke auf **"🎨 Custom Designer"** in der Effekt-Vorlagen Sidebar
+
+2. **Grundeinstellungen**
+   - **Name**: z.B. "Mein Sonnenaufgang"
+   - **Modus**: Wähle "Spots (Einzellichter)"
+   - **Geräte**: Wähle die Zielgeräte aus
+   - **Dauer**: z.B. 10 Sekunden
+
+3. **Keyframes bearbeiten**
+   - **Timeline**: Klicke auf die Timeline um Keyframes hinzuzufügen
+   - **Farbe wählen**: Nutze den Color Picker oder RGB-Inputs
+   - **Easing**: Wähle die Übergangsart (Linear, Ease-In, Ease-Out, Ease-In-Out)
+   - **Zeit**: Positioniere den Keyframe auf der Timeline (0-100%)
+
+4. **Vorlagen nutzen (Empfohlen für Anfänger)**
+   - **Fade**: Sanftes Ein- und Ausblenden
+   - **Pulse**: Atmender Pulseffekt
+   - **Farbwechsel**: RGB-Farbzyklus
+   - **Stroboskop**: Schnelles Blinken
+
+5. **Preview & Speichern**
+   - Klicke **▶️ Play** um die Animation in der Timeline zu sehen
+   - Klicke **"💾 Speichern & Starten"** um den Effekt zu aktivieren
+
+**LED Strip Mode - Für LED-Streifen:**
+
+1. **Modus wechseln**: Wähle "LED Strips" statt "Spots"
+
+2. **Pattern auswählen**:
+   - **Einfarbig (Solid)**: Gleichmäßige Farbe über alle Pixel
+   - **Gradient**: Sanfter Farbverlauf
+   - **Welle (Wave)**: Sinuswellen-Muster (einstellbare Wellenlänge)
+   - **Lauflicht (Chase)**: Bewegendes Licht (einstellbare Breite & Geschwindigkeit)
+
+3. **Pattern-Parameter einstellen**:
+   - **Wave**: Wellenlänge (5-50), Amplitude (0-255)
+   - **Chase**: Breite (1-20), Geschwindigkeit (0.5-10)
+   - **Gradient**: Startfarbe, Endfarbe
+
+4. **Keyframes für Strip-Patterns**:
+   - Jeder Keyframe kann ein anderes Pattern haben
+   - Z.B.: Start mit Gradient → Mitte mit Wave → Ende mit Chase
+
+**Pro-Tipps:**
+- 🎨 Nutze Vorlagen als Ausgangspunkt und passe sie an
+- ⏱️ Die Timeline zeigt 0-100% - unabhängig von der Gesamtdauer
+- 🔄 Kombiniere verschiedene Easing-Funktionen für interessante Effekte
+- 📊 Strip Patterns sind ideal für lange LED-Streifen und Pixel-Bars
+- 💾 Gespeicherte Custom Effects erscheinen in der Effekt-Liste
+
+---
+
+### Schritt 7: Timeline erstellen (Automatische Abläufe)
 
 1. **Gehe zum "Timeline"-Tab**
 2. **Klicke "+ Timeline hinzufügen"**
