@@ -37,10 +37,20 @@ class TestDeviceEndpoints:
         data = response.json()
         assert "device" in data
 
-    def test_update_device_values(self, client: TestClient, sample_device: dict):
+    def test_update_device_values(self, client: TestClient):
         """Test updating device values."""
+        # Create a unique device for this test
+        unique_device = {
+            "name": "Test Update Light",
+            "ip": "192.168.1.101",  # Different IP
+            "universe": 0,
+            "start_channel": 10,  # Different channel
+            "device_type": "rgb",
+            "channel_count": 3
+        }
+
         # First add a device
-        add_response = client.post("/api/devices", json=sample_device)
+        add_response = client.post("/api/devices", json=unique_device)
         assert add_response.status_code == 200
         device_id = add_response.json()["device"]["id"]
 
