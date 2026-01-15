@@ -1544,6 +1544,26 @@ class DMXController {
         // Show/hide appropriate editors
         document.getElementById('spotKeyframeEditor').style.display = mode === 'spot' ? 'block' : 'none';
         document.getElementById('stripKeyframeEditor').style.display = mode === 'strip' ? 'block' : 'none';
+
+        // Reset keyframes when switching modes (they have different structures)
+        this.designerKeyframes = [];
+        this.currentKeyframeIndex = -1;
+        document.getElementById('keyframeEditor').style.display = 'none';
+
+        // Initialize default keyframes for the new mode
+        if (mode === 'spot') {
+            this.designerKeyframes = [
+                { time: 0, values: { default: [255, 255, 255] }, easing: 'linear' },
+                { time: 100, values: { default: [255, 0, 0] }, easing: 'linear' }
+            ];
+        } else {
+            this.designerKeyframes = [
+                { time: 0, pattern_type: 'solid', pattern: { color: [255, 255, 255] }, easing: 'linear' },
+                { time: 100, pattern_type: 'solid', pattern: { color: [255, 0, 0] }, easing: 'linear' }
+            ];
+        }
+
+        this.drawTimeline();
     }
 
     initializeTimeline() {
@@ -1656,15 +1676,21 @@ class DMXController {
             ? Math.min(100, this.designerKeyframes[this.designerKeyframes.length - 1].time + 10)
             : 50;
 
-        const newKeyframe = {
-            time: newTime,
-            values: { default: [255, 255, 255] },
-            easing: 'linear'
-        };
+        let newKeyframe;
 
-        if (this.designerMode === 'strip') {
-            newKeyframe.pattern = { color: [255, 255, 255] };
-            newKeyframe.pattern_type = 'solid';
+        if (this.designerMode === 'spot') {
+            newKeyframe = {
+                time: newTime,
+                values: { default: [255, 255, 255] },
+                easing: 'linear'
+            };
+        } else {
+            newKeyframe = {
+                time: newTime,
+                pattern_type: 'solid',
+                pattern: { color: [255, 255, 255] },
+                easing: 'linear'
+            };
         }
 
         this.designerKeyframes.push(newKeyframe);
@@ -1729,6 +1755,45 @@ class DMXController {
 
             this.updateStripPattern();
 
+            // Load pattern parameters if they exist
+            if (kf.pattern) {
+                if (kf.pattern_type === 'solid' && kf.pattern.color) {
+                    const hex = '#' + kf.pattern.color.map(v => v.toString(16).padStart(2, '0')).join('');
+                    document.getElementById('stripColor').value = hex;
+                } else if (kf.pattern_type === 'gradient') {
+                    if (kf.pattern.start_color) {
+                        const startHex = '#' + kf.pattern.start_color.map(v => v.toString(16).padStart(2, '0')).join('');
+                        document.getElementById('gradientStart').value = startHex;
+                    }
+                    if (kf.pattern.end_color) {
+                        const endHex = '#' + kf.pattern.end_color.map(v => v.toString(16).padStart(2, '0')).join('');
+                        document.getElementById('gradientEnd').value = endHex;
+                    }
+                } else if (kf.pattern_type === 'wave') {
+                    if (kf.pattern.color) {
+                        const hex = '#' + kf.pattern.color.map(v => v.toString(16).padStart(2, '0')).join('');
+                        document.getElementById('waveColor').value = hex;
+                    }
+                    if (kf.pattern.wavelength !== undefined) {
+                        document.getElementById('waveLength').value = kf.pattern.wavelength;
+                        document.getElementById('waveLengthValue').textContent = kf.pattern.wavelength;
+                    }
+                    if (kf.pattern.amplitude !== undefined) {
+                        document.getElementById('waveAmplitude').value = kf.pattern.amplitude;
+                        document.getElementById('waveAmplitudeValue').textContent = kf.pattern.amplitude;
+                    }
+                } else if (kf.pattern_type === 'chase') {
+                    if (kf.pattern.color) {
+                        const hex = '#' + kf.pattern.color.map(v => v.toString(16).padStart(2, '0')).join('');
+                        document.getElementById('chaseColor').value = hex;
+                    }
+                    if (kf.pattern.width !== undefined) {
+                        document.getElementById('chaseWidth').value = kf.pattern.width;
+                        document.getElementById('chaseWidthValue').textContent = kf.pattern.width;
+                    }
+                }
+            }
+
             document.getElementById('stripKfPosition').oninput = (e) => {
                 document.getElementById('stripKfPositionValue').textContent = e.target.value + '%';
             };
@@ -1787,6 +1852,7 @@ class DMXController {
         } else {
             kf.time = parseFloat(document.getElementById('stripKfPosition').value);
             kf.pattern_type = document.getElementById('stripPattern').value;
+            kf.easing = 'linear'; // Default easing for strips
 
             if (kf.pattern_type === 'solid') {
                 const hex = document.getElementById('stripColor').value;
@@ -1798,30 +1864,36 @@ class DMXController {
                 const startHex = document.getElementById('gradientStart').value;
                 const endHex = document.getElementById('gradientEnd').value;
                 kf.pattern = {
-                    color: [
+                    start_color: [
                         parseInt(startHex.substr(1, 2), 16),
                         parseInt(startHex.substr(3, 2), 16),
                         parseInt(startHex.substr(5, 2), 16)
+                    ],
+                    end_color: [
+                        parseInt(endHex.substr(1, 2), 16),
+                        parseInt(endHex.substr(3, 2), 16),
+                        parseInt(endHex.substr(5, 2), 16)
                     ]
                 };
-                // Store end color in next keyframe pattern
-                const nextKf = this.designerKeyframes[this.currentKeyframeIndex + 1];
-                if (nextKf) {
-                    nextKf.pattern = {
-                        color: [
-                            parseInt(endHex.substr(1, 2), 16),
-                            parseInt(endHex.substr(3, 2), 16),
-                            parseInt(endHex.substr(5, 2), 16)
-                        ]
-                    };
-                }
             } else if (kf.pattern_type === 'wave') {
+                const hex = document.getElementById('waveColor').value;
                 kf.pattern = {
+                    color: [
+                        parseInt(hex.substr(1, 2), 16),
+                        parseInt(hex.substr(3, 2), 16),
+                        parseInt(hex.substr(5, 2), 16)
+                    ],
                     wavelength: parseInt(document.getElementById('waveLength').value),
                     amplitude: parseInt(document.getElementById('waveAmplitude').value)
                 };
             } else if (kf.pattern_type === 'chase') {
+                const hex = document.getElementById('chaseColor').value;
                 kf.pattern = {
+                    color: [
+                        parseInt(hex.substr(1, 2), 16),
+                        parseInt(hex.substr(3, 2), 16),
+                        parseInt(hex.substr(5, 2), 16)
+                    ],
                     width: parseInt(document.getElementById('chaseWidth').value)
                 };
             }
@@ -1894,38 +1966,75 @@ class DMXController {
     }
 
     loadTemplate(templateName) {
-        switch (templateName) {
-            case 'fade':
-                this.designerKeyframes = [
-                    { time: 0, values: { default: [0, 0, 0] }, easing: 'linear' },
-                    { time: 50, values: { default: [255, 255, 255] }, easing: 'ease-in-out' },
-                    { time: 100, values: { default: [0, 0, 0] }, easing: 'linear' }
-                ];
-                break;
-            case 'pulse':
-                this.designerKeyframes = [
-                    { time: 0, values: { default: [50, 50, 50] }, easing: 'ease-in' },
-                    { time: 50, values: { default: [255, 255, 255] }, easing: 'ease-out' },
-                    { time: 100, values: { default: [50, 50, 50] }, easing: 'linear' }
-                ];
-                break;
-            case 'colorCycle':
-                this.designerKeyframes = [
-                    { time: 0, values: { default: [255, 0, 0] }, easing: 'linear' },
-                    { time: 33, values: { default: [0, 255, 0] }, easing: 'linear' },
-                    { time: 66, values: { default: [0, 0, 255] }, easing: 'linear' },
-                    { time: 100, values: { default: [255, 0, 0] }, easing: 'linear' }
-                ];
-                break;
-            case 'strobe':
-                this.designerKeyframes = [
-                    { time: 0, values: { default: [0, 0, 0] }, easing: 'linear' },
-                    { time: 10, values: { default: [255, 255, 255] }, easing: 'linear' },
-                    { time: 20, values: { default: [0, 0, 0] }, easing: 'linear' },
-                    { time: 30, values: { default: [255, 255, 255] }, easing: 'linear' },
-                    { time: 40, values: { default: [0, 0, 0] }, easing: 'linear' }
-                ];
-                break;
+        if (this.designerMode === 'spot') {
+            switch (templateName) {
+                case 'fade':
+                    this.designerKeyframes = [
+                        { time: 0, values: { default: [0, 0, 0] }, easing: 'linear' },
+                        { time: 50, values: { default: [255, 255, 255] }, easing: 'ease-in-out' },
+                        { time: 100, values: { default: [0, 0, 0] }, easing: 'linear' }
+                    ];
+                    break;
+                case 'pulse':
+                    this.designerKeyframes = [
+                        { time: 0, values: { default: [50, 50, 50] }, easing: 'ease-in' },
+                        { time: 50, values: { default: [255, 255, 255] }, easing: 'ease-out' },
+                        { time: 100, values: { default: [50, 50, 50] }, easing: 'linear' }
+                    ];
+                    break;
+                case 'colorCycle':
+                    this.designerKeyframes = [
+                        { time: 0, values: { default: [255, 0, 0] }, easing: 'linear' },
+                        { time: 33, values: { default: [0, 255, 0] }, easing: 'linear' },
+                        { time: 66, values: { default: [0, 0, 255] }, easing: 'linear' },
+                        { time: 100, values: { default: [255, 0, 0] }, easing: 'linear' }
+                    ];
+                    break;
+                case 'strobe':
+                    this.designerKeyframes = [
+                        { time: 0, values: { default: [0, 0, 0] }, easing: 'linear' },
+                        { time: 10, values: { default: [255, 255, 255] }, easing: 'linear' },
+                        { time: 20, values: { default: [0, 0, 0] }, easing: 'linear' },
+                        { time: 30, values: { default: [255, 255, 255] }, easing: 'linear' },
+                        { time: 40, values: { default: [0, 0, 0] }, easing: 'linear' }
+                    ];
+                    break;
+            }
+        } else {
+            // Strip mode templates
+            switch (templateName) {
+                case 'fade':
+                    this.designerKeyframes = [
+                        { time: 0, pattern_type: 'solid', pattern: { color: [0, 0, 0] }, easing: 'linear' },
+                        { time: 50, pattern_type: 'solid', pattern: { color: [255, 255, 255] }, easing: 'ease-in-out' },
+                        { time: 100, pattern_type: 'solid', pattern: { color: [0, 0, 0] }, easing: 'linear' }
+                    ];
+                    break;
+                case 'pulse':
+                    this.designerKeyframes = [
+                        { time: 0, pattern_type: 'solid', pattern: { color: [50, 50, 50] }, easing: 'ease-in' },
+                        { time: 50, pattern_type: 'solid', pattern: { color: [255, 255, 255] }, easing: 'ease-out' },
+                        { time: 100, pattern_type: 'solid', pattern: { color: [50, 50, 50] }, easing: 'linear' }
+                    ];
+                    break;
+                case 'colorCycle':
+                    this.designerKeyframes = [
+                        { time: 0, pattern_type: 'solid', pattern: { color: [255, 0, 0] }, easing: 'linear' },
+                        { time: 33, pattern_type: 'solid', pattern: { color: [0, 255, 0] }, easing: 'linear' },
+                        { time: 66, pattern_type: 'solid', pattern: { color: [0, 0, 255] }, easing: 'linear' },
+                        { time: 100, pattern_type: 'solid', pattern: { color: [255, 0, 0] }, easing: 'linear' }
+                    ];
+                    break;
+                case 'strobe':
+                    this.designerKeyframes = [
+                        { time: 0, pattern_type: 'solid', pattern: { color: [0, 0, 0] }, easing: 'linear' },
+                        { time: 10, pattern_type: 'solid', pattern: { color: [255, 255, 255] }, easing: 'linear' },
+                        { time: 20, pattern_type: 'solid', pattern: { color: [0, 0, 0] }, easing: 'linear' },
+                        { time: 30, pattern_type: 'solid', pattern: { color: [255, 255, 255] }, easing: 'linear' },
+                        { time: 40, pattern_type: 'solid', pattern: { color: [0, 0, 0] }, easing: 'linear' }
+                    ];
+                    break;
+            }
         }
 
         this.drawTimeline();
