@@ -6,6 +6,7 @@ Eine moderne, browserbasierte Steuerungslösung für DMX-Lichtanlagen mit Art-Ne
 [![Python](https://img.shields.io/badge/Python-3.11+-green.svg)](https://www.python.org/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-Latest-teal.svg)](https://fastapi.tiangolo.com/)
 [![License](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![CI/CD Pipeline](https://github.com/IT-Networks/Dmx-Web-Controller/actions/workflows/ci-cd.yml/badge.svg)](https://github.com/IT-Networks/Dmx-Web-Controller/actions/workflows/ci-cd.yml)
 
 ---
 
