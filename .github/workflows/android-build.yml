@@ -39,7 +39,7 @@ jobs:
 
       - name: Initialize Capacitor Android platform
         run: |
-          if [ ! -d "android" ] || [ ! -f "android/build.gradle" ]; then
+          if [ ! -d "android" ] || [ ! -f "android/gradlew" ]; then
             echo "📱 Adding Android platform..."
             npx cap add android
           else
@@ -48,6 +48,19 @@ jobs:
 
       - name: Sync Capacitor
         run: npx cap sync android
+
+      - name: Create custom Android resources
+        run: |
+          mkdir -p android/app/src/main/res/values
+          cat > android/app/src/main/res/values/strings.xml << 'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <resources>
+              <string name="app_name">DMX Controller</string>
+              <string name="title_activity_main">DMX Controller</string>
+              <string name="package_name">com.itnetworks.dmxcontroller</string>
+              <string name="custom_url_scheme">com.itnetworks.dmxcontroller</string>
+          </resources>
+          EOF
 
       - name: Grant execute permission for gradlew
         run: chmod +x android/gradlew

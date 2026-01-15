@@ -26,11 +26,14 @@ APKs werden automatisch bei jedem Push/PR gebaut und sind unter **GitHub Actions
 
 ### Installation
 
+**Wichtig:** Das `android/` Verzeichnis ist in `.gitignore` und wird lokal von Capacitor generiert.
+
 ```bash
 # Dependencies installieren
 npm install
 
 # Android Platform hinzufügen (nur beim ersten Mal)
+# Dies generiert das vollständige android/ Verzeichnis
 npm run add:android
 
 # Frontend mit Android synchronisieren

@@ -33,7 +33,10 @@ yarn-debug.log*
 yarn-error.log*
 yarn.lock
 
-# Android
+# Android (Capacitor-generated, not in Git)
+android/
+
+# Android artifacts
 *.apk
 *.ap_
 *.aab
@@ -50,16 +53,8 @@ local.properties
 *.jks
 *.keystore
 key.properties
-android/.gradle
-android/build
-android/app/build
-android/app/release
-android/captures
-android/local.properties
 
 # Capacitor
 .capacitor/
-android/capacitor-cordova-android-plugins/
-android/.idea/
 ios/
 
