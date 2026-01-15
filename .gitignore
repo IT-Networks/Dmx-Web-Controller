@@ -10,6 +10,7 @@ ENV/
 build/
 dist/
 *.egg-info/
+*.log
 
 # Data directories (runtime generated)
 data/
