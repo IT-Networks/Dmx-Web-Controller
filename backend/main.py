@@ -1423,7 +1423,7 @@ async def fade_to_scene(scene_id: str):
 @app.get("/")
 async def root():
     """Serve Frontend"""
-    return FileResponse(str(FRONTEND_DIR / "Index.html"))
+    return FileResponse(str(FRONTEND_DIR / "index.html"))
 
 
 @app.get("/api/devices")
