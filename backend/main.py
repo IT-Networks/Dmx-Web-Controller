@@ -22,8 +22,7 @@ import shutil
 from datetime import datetime
 import ipaddress
 import math
-
-app = FastAPI(title="DMX Web Controller")
+from contextlib import asynccontextmanager
 
 # Logging Configuration
 logging.basicConfig(
@@ -59,6 +58,17 @@ BASE_DIR = Path(__file__).parent.parent
 FRONTEND_DIR = BASE_DIR / "frontend"
 if not FRONTEND_DIR.exists():
     FRONTEND_DIR = Path("/app/frontend")  # Docker fallback
+
+# Lifespan event handler (defined early, but load_data() is defined later)
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup
+    load_data()  # Function defined below
+    yield
+    # Shutdown (if needed in future)
+
+# Create FastAPI app with lifespan
+app = FastAPI(title="DMX Web Controller", lifespan=lifespan)
 
 # CORS für mehrere Clients
 app.add_middleware(
@@ -658,7 +668,6 @@ class EffectEngine:
                             frequency_band: str = 'overall', sensitivity: float = 1.0,
                             is_group: bool = False):
         """Sound-reaktiver Effekt"""
-        global current_audio_data
         import colorsys
 
         last_trigger = 0
@@ -1116,8 +1125,6 @@ async def cleanup_task(task: asyncio.Task, task_dict: Dict, task_id: str, task_t
 
 async def enforce_resource_limits():
     """Enforces resource limits on active effects and sequences"""
-    global active_effects, active_sequences
-
     # Check effect limits
     if len(active_effects) >= config.MAX_ACTIVE_EFFECTS:
         logger.warning(f"Effect limit reached ({config.MAX_ACTIVE_EFFECTS}), stopping oldest")
@@ -1139,8 +1146,6 @@ async def enforce_resource_limits():
 async def start_effect(effect_id: str, effect_type: str, target_ids: List[str],
                        params: dict, is_group: bool = False):
     """Startet einen Effekt mit Resource Management"""
-    global active_effects
-
     # Enforce resource limits
     await enforce_resource_limits()
 
@@ -1328,8 +1333,6 @@ async def play_sequence(sequence_id: str, loop: bool = False):
 
 async def start_sequence(sequence_id: str):
     """Startet eine Sequence"""
-    global active_sequences
-
     # Stop existing sequence
     if sequence_id in active_sequences:
         active_sequences[sequence_id].cancel()
@@ -1415,9 +1418,6 @@ async def fade_to_scene(scene_id: str):
 
 
 # API Endpoints
-@app.on_event("startup")
-async def startup():
-    load_data()
 
 
 @app.get("/")
@@ -1766,8 +1766,6 @@ async def create_sequence(sequence_data: SequenceCreate):
 @app.put("/api/sequences/{sequence_id}")
 async def update_sequence(sequence_id: str, sequence: dict):
     """Aktualisiert eine Sequence"""
-    global sequences
-
     idx = next((i for i, s in enumerate(sequences) if s['id'] == sequence_id), None)
     if idx is not None:
         sequences[idx] = {**sequences[idx], **sequence, 'id': sequence_id}
@@ -1965,7 +1963,6 @@ async def websocket_endpoint(websocket: WebSocket):
 
             elif data['type'] == 'audio_data':
                 # Update global audio data from client
-                global current_audio_data
                 audio_info = data.get('data', {})
                 current_audio_data.update({
                     'bass': audio_info.get('bass', 0.0),
