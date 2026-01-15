@@ -25,3 +25,36 @@ data/
 .DS_Store
 Thumbs.db
 backend/dmx_controller.log
+
+# Node.js
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+yarn.lock
+
+# Android (Capacitor-generated, not in Git)
+android/
+
+# Android artifacts
+*.apk
+*.ap_
+*.aab
+*.dex
+*.class
+bin/
+gen/
+out/
+.gradle/
+local.properties
+*.iml
+.externalNativeBuild
+.cxx
+*.jks
+*.keystore
+key.properties
+
+# Capacitor
+.capacitor/
+ios/
+
