@@ -7,7 +7,7 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, Field, validator
+from pydantic import BaseModel, Field, field_validator
 import json
 import asyncio
 from pathlib import Path
@@ -206,7 +206,8 @@ class DeviceCreate(BaseModel):
     fixture_id: Optional[str] = None
     channel_layout: Optional[Dict] = None
 
-    @validator('ip')
+    @field_validator('ip')
+    @classmethod
     def validate_ip(cls, v):
         try:
             ipaddress.ip_address(v)
@@ -214,7 +215,8 @@ class DeviceCreate(BaseModel):
         except ValueError:
             raise ValueError('Invalid IP address')
 
-    @validator('name')
+    @field_validator('name')
+    @classmethod
     def validate_name(cls, v):
         if not v.strip():
             raise ValueError('Name cannot be empty')
@@ -229,13 +231,13 @@ class SceneCreate(BaseModel):
 
 class GroupCreate(BaseModel):
     name: str = Field(..., max_length=config.MAX_NAME_LENGTH, min_length=1)
-    device_ids: List[str] = Field(..., min_items=1)
+    device_ids: List[str] = Field(..., min_length=1)
 
 
 class EffectCreate(BaseModel):
     name: str = Field(..., max_length=config.MAX_NAME_LENGTH, min_length=1)
     type: str
-    target_ids: List[str] = Field(..., min_items=1)
+    target_ids: List[str] = Field(..., min_length=1)
     params: Dict = Field(default_factory=dict)
     is_group: bool = False
 
@@ -243,7 +245,7 @@ class EffectCreate(BaseModel):
 class SequenceCreate(BaseModel):
     name: str = Field(..., max_length=config.MAX_NAME_LENGTH, min_length=1)
     loop: bool = False
-    steps: List[Dict] = Field(..., max_items=config.MAX_SEQUENCE_STEPS)
+    steps: List[Dict] = Field(..., max_length=config.MAX_SEQUENCE_STEPS)
 
 
 # Backup & Data Persistence Functions
@@ -1445,7 +1447,7 @@ async def add_device(device_data: DeviceCreate):
                 existing['start_channel'] == device_data.start_channel):
                 raise HTTPException(status_code=400, detail="Device with same IP, universe, and channel already exists")
 
-        device = device_data.dict()
+        device = device_data.model_dump()
         device['id'] = f"device_{int(time.time() * 1000)}"
         device['values'] = [0] * device['channel_count']
 
@@ -1517,7 +1519,7 @@ async def add_scene(scene_data: SceneCreate):
         if len(scenes) >= config.MAX_SCENES:
             raise HTTPException(status_code=400, detail=f"Maximum scene limit ({config.MAX_SCENES}) reached")
 
-        scene = scene_data.dict()
+        scene = scene_data.model_dump()
         scene['id'] = f"scene_{int(time.time() * 1000)}"
 
         # If device_values not provided, capture current values
@@ -1664,7 +1666,7 @@ async def get_effects():
 async def create_effect(effect_data: EffectCreate):
     """Erstellt und speichert Effekt mit Validation"""
     try:
-        effect = effect_data.dict()
+        effect = effect_data.model_dump()
         effect['id'] = f"effect_{int(time.time() * 1000)}"
         effects.append(effect)
         save_effects()
@@ -1743,7 +1745,7 @@ async def get_sequences():
 async def create_sequence(sequence_data: SequenceCreate):
     """Erstellt eine neue Sequence mit Validation"""
     try:
-        sequence = sequence_data.dict()
+        sequence = sequence_data.model_dump()
         sequence['id'] = f"seq_{int(time.time() * 1000)}"
         sequences.append(sequence)
         save_sequences()
