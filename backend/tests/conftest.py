@@ -31,7 +31,8 @@ def sample_device() -> dict:
         "ip": "192.168.1.100",
         "universe": 0,
         "start_channel": 1,
-        "type": "rgb"
+        "device_type": "rgb",
+        "channel_count": 3
     }
 
 
@@ -71,61 +72,3 @@ def sample_effect() -> dict:
     }
 
 
-@pytest.fixture
-def sample_custom_effect_spot() -> dict:
-    """Sample custom effect for spot mode."""
-    return {
-        "name": "Test Spot Effect",
-        "type": "custom",
-        "target_ids": ["device_1"],
-        "params": {
-            "keyframes": [
-                {"time": 0, "values": {"default": [255, 0, 0]}, "easing": "linear"},
-                {"time": 100, "values": {"default": [0, 0, 255]}, "easing": "linear"}
-            ],
-            "duration": 5.0,
-            "mode": "spot"
-        },
-        "is_group": False
-    }
-
-
-@pytest.fixture
-def sample_custom_effect_strip() -> dict:
-    """Sample custom effect for strip mode."""
-    return {
-        "name": "Test Strip Effect",
-        "type": "custom",
-        "target_ids": ["device_1"],
-        "params": {
-            "keyframes": [
-                {
-                    "time": 0,
-                    "pattern_type": "wave",
-                    "pattern": {
-                        "color": [255, 0, 0],
-                        "wavelength": 10,
-                        "amplitude": 255
-                    },
-                    "easing": "linear"
-                }
-            ],
-            "duration": 5.0,
-            "mode": "strip"
-        },
-        "is_group": False
-    }
-
-
-@pytest.fixture
-def sample_sequence() -> dict:
-    """Sample sequence configuration for testing."""
-    return {
-        "name": "Test Sequence",
-        "steps": [
-            {"type": "scene", "id": "scene_1", "duration": 5},
-            {"type": "effect", "id": "effect_1", "duration": 10},
-            {"type": "pause", "duration": 2}
-        ],
-        "loop": False
-    }
