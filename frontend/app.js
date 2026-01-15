@@ -7,6 +7,7 @@ class DMXController {
         this.scenes = [];
         this.groups = [];
         this.effects = [];
+        this.sequences = [];
         this.fixtures = {};
         this.selectedFixture = null;
         this.selectedDeviceType = 'dimmer';
@@ -92,7 +93,12 @@ class DMXController {
                 this.effects = data.effects;
                 this.renderEffects();
                 break;
-                
+
+            case 'sequences_updated':
+                this.sequences = data.sequences;
+                this.renderSequences();
+                break;
+
             case 'device_values_updated':
                 this.updateDeviceUI(data.device_id, data.values);
                 break;
@@ -142,6 +148,7 @@ class DMXController {
         this.renderGroups();
         this.renderScenes();
         this.renderEffects();
+        this.renderSequences();
     }
     
     // ===== Tab Switching =====
@@ -167,20 +174,22 @@ class DMXController {
             'devices': ['Geräte', 'Verwalte deine DMX-Geräte'],
             'groups': ['Gruppen', 'Steuere mehrere Geräte gleichzeitig'],
             'scenes': ['Szenen', 'Gespeicherte Lichtstimmungen'],
-            'effects': ['Effekte', 'Dynamische Lichteffekte']
+            'effects': ['Effekte', 'Dynamische Lichteffekte'],
+            'sequences': ['Timeline', 'Erstelle Sequenzen aus Szenen und Effekten']
         };
-        
+
         const [title, subtitle] = titles[tabName];
         document.getElementById('pageTitle').textContent = title;
         document.getElementById('pageSubtitle').textContent = subtitle;
-        
+
         const buttons = {
             'devices': '<button class="btn btn-primary" onclick="app.showAddDevice()"><svg width="20" height="20" viewBox="0 0 20 20"><path d="M10 3 L10 17 M3 10 L17 10" stroke="currentColor" stroke-width="2"/></svg><span>Gerät hinzufügen</span></button>',
             'groups': '<button class="btn btn-primary" onclick="app.showAddGroup()"><svg width="20" height="20" viewBox="0 0 20 20"><path d="M10 3 L10 17 M3 10 L17 10" stroke="currentColor" stroke-width="2"/></svg><span>Gruppe erstellen</span></button>',
             'scenes': '<button class="btn btn-primary" onclick="app.showAddScene()"><svg width="20" height="20" viewBox="0 0 20 20"><path d="M10 3 L10 17 M3 10 L17 10" stroke="currentColor" stroke-width="2"/></svg><span>Szene erstellen</span></button>',
-            'effects': ''
+            'effects': '',
+            'sequences': '<button class="btn btn-primary" onclick="app.showAddSequence()"><svg width="20" height="20" viewBox="0 0 20 20"><path d="M10 3 L10 17 M3 10 L17 10" stroke="currentColor" stroke-width="2"/></svg><span>Timeline hinzufügen</span></button>'
         };
-        
+
         document.getElementById('headerActions').innerHTML = buttons[tabName];
     }
     
@@ -586,10 +595,7 @@ class DMXController {
             backdrop.addEventListener('click', (e) => e.target.parentElement.classList.remove('active'));
         });
     }
-}
 
-const app = new DMXController();
-    
     // ===== Fixture Library =====
     async loadFixtures() {
         try {
@@ -601,7 +607,7 @@ const app = new DMXController();
             console.error('Error loading fixtures:', error);
         }
     }
-    
+
     populateFixtureSelect() {
         const select = document.getElementById('fixtureSelect');
         const categoryNames = {
@@ -615,48 +621,49 @@ const app = new DMXController();
             'beam': 'Beam Lights',
             'strobe': 'Strobes',
             'laser': 'Laser',
-            'effect': 'Effekte'
+            'effect': 'Effekte',
+            'panel': 'LED Panels'
         };
-        
+
         for (const [category, fixtures] of Object.entries(this.fixtures)) {
             const optgroup = document.createElement('optgroup');
             optgroup.label = categoryNames[category] || category;
-            
+
             fixtures.forEach(fixture => {
                 const option = document.createElement('option');
                 option.value = fixture.id;
                 option.textContent = `${fixture.manufacturer} ${fixture.model} (${fixture.channels}CH)`;
                 optgroup.appendChild(option);
             });
-            
+
             select.appendChild(optgroup);
         }
     }
-    
+
     async selectFixture() {
         const fixtureId = document.getElementById('fixtureSelect').value;
         const manualTypeGroup = document.getElementById('manualTypeGroup');
         const fixtureInfo = document.getElementById('fixtureInfo');
         const fixtureInfoText = document.getElementById('fixtureInfoText');
-        
+
         if (!fixtureId) {
             manualTypeGroup.style.display = 'block';
             fixtureInfo.style.display = 'none';
             this.selectedFixture = null;
             return;
         }
-        
+
         try {
             const response = await fetch(`/api/fixtures/${fixtureId}`);
             const data = await response.json();
             const fixture = data.fixture;
-            
+
             if (fixture) {
                 this.selectedFixture = fixture;
                 manualTypeGroup.style.display = 'none';
                 fixtureInfo.style.display = 'block';
                 fixtureInfoText.textContent = `${fixture.manufacturer} ${fixture.model} - ${fixture.channels} Kanäle`;
-                
+
                 if (!document.getElementById('deviceName').value) {
                     document.getElementById('deviceName').value = `${fixture.manufacturer} ${fixture.model}`;
                 }
@@ -665,3 +672,1428 @@ const app = new DMXController();
             console.error('Error loading fixture:', error);
         }
     }
+
+    // ===== Sound & Audio =====
+    async toggleSound() {
+        if (!this.audioAnalyzer) {
+            this.audioAnalyzer = new AudioAnalyzer((audioData) => this.handleAudioData(audioData));
+            this.currentAudioData = null;
+        }
+
+        const btn = document.getElementById('startSoundBtn');
+        const status = document.getElementById('soundStatus');
+        const levelsDisplay = document.getElementById('soundLevelsDisplay');
+
+        if (this.audioAnalyzer.isActive) {
+            this.audioAnalyzer.stop();
+            btn.textContent = '🎤 Audio aktivieren';
+            status.textContent = 'Inaktiv';
+            status.style.color = 'var(--text-secondary)';
+            levelsDisplay.style.display = 'none';
+        } else {
+            const success = await this.audioAnalyzer.start();
+            if (success) {
+                btn.textContent = '🔇 Audio deaktivieren';
+                status.textContent = 'Aktiv';
+                status.style.color = 'var(--success)';
+                levelsDisplay.style.display = 'block';
+                this.showToast('Audio-Analyse aktiviert', 'success');
+            } else {
+                this.showToast('Mikrofon-Zugriff verweigert', 'error');
+            }
+        }
+    }
+
+    handleAudioData(audioData) {
+        this.currentAudioData = audioData;
+
+        const levelBar = document.getElementById('soundLevelBar');
+        const levelText = document.getElementById('soundLevelText');
+        if (levelBar && levelText) {
+            const percent = Math.round(audioData.overall * 100);
+            levelBar.style.width = percent + '%';
+            levelText.textContent = percent + '%';
+        }
+
+        if (document.getElementById('effectEditorModal') && document.getElementById('effectEditorModal').classList.contains('active')) {
+            this.updateSoundVisualizer(audioData);
+        }
+
+        if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+            this.ws.send(JSON.stringify({
+                type: 'audio_data',
+                data: {
+                    bass: audioData.bass,
+                    mid: audioData.mid,
+                    high: audioData.high,
+                    overall: audioData.overall,
+                    peak: audioData.peak
+                }
+            }));
+        }
+    }
+
+    updateSoundVisualizer(audioData) {
+        const levelBass = document.getElementById('levelBass');
+        const levelMid = document.getElementById('levelMid');
+        const levelHigh = document.getElementById('levelHigh');
+
+        if (levelBass) levelBass.style.width = (audioData.bass * 100) + '%';
+        if (levelMid) levelMid.style.width = (audioData.mid * 100) + '%';
+        if (levelHigh) levelHigh.style.width = (audioData.high * 100) + '%';
+
+        const canvas = document.getElementById('soundVisualizerCanvas');
+        if (!canvas) return;
+
+        const ctx = canvas.getContext('2d');
+        const width = canvas.width;
+        const height = canvas.height;
+
+        ctx.fillStyle = 'getComputedStyle(document.body).getPropertyValue("--bg-primary")' || '#0f172a';
+        ctx.fillRect(0, 0, width, height);
+
+        if (audioData.raw && audioData.raw.length > 0) {
+            const barWidth = width / Math.min(audioData.raw.length, 64);
+            const maxHeight = height;
+            const step = Math.floor(audioData.raw.length / 64);
+
+            for (let i = 0; i < 64; i++) {
+                const dataIndex = Math.floor(i * step);
+                const barHeight = (audioData.raw[dataIndex] / 255) * maxHeight;
+                const hue = (i / 64) * 180 + 180;
+                ctx.fillStyle = `hsl(${hue}, 70%, 60%)`;
+                ctx.fillRect(i * barWidth, maxHeight - barHeight, barWidth - 1, barHeight);
+            }
+        }
+    }
+
+    toggleSoundPanel() {
+        const panel = document.getElementById('soundControlPanel');
+        const body = panel.querySelector('.sound-panel-body');
+        const btn = panel.querySelector('.btn-icon');
+
+        if (body.style.display === 'none') {
+            body.style.display = 'block';
+            btn.textContent = '−';
+        } else {
+            body.style.display = 'none';
+            btn.textContent = '+';
+        }
+    }
+
+    // ===== Effect Editor =====
+    createEffect(type) {
+        this.currentEffectConfig = {
+            type: type,
+            name: '',
+            target_ids: [],
+            is_group: false,
+            params: {},
+            sound_reactive: false,
+            sound_config: {}
+        };
+
+        this.openEffectEditor();
+    }
+
+    openEffectEditor() {
+        const modal = document.getElementById('effectEditorModal');
+        const title = document.getElementById('effectEditorTitle');
+
+        modal.classList.add('active');
+        title.textContent = this.currentEffectConfig.name || 'Neuer Effekt';
+
+        document.getElementById('effectEditorType').value = this.currentEffectConfig.type || 'strobe';
+        this.populateEffectTargets();
+        this.updateEffectEditorParams();
+        this.initEffectPreview();
+
+        document.getElementById('effectSoundReactive').checked = this.currentEffectConfig.sound_reactive || false;
+        this.toggleSoundReactive();
+    }
+
+    closeEffectEditor() {
+        const modal = document.getElementById('effectEditorModal');
+        modal.classList.remove('active');
+        this.stopPreviewEffect();
+        this.currentEffectConfig = null;
+    }
+
+    populateEffectTargets() {
+        const deviceSelect = document.getElementById('effectDeviceSelect');
+        deviceSelect.innerHTML = '';
+
+        this.devices.forEach(device => {
+            const label = document.createElement('label');
+            label.className = 'device-select-item';
+            label.innerHTML = `
+                <input type="checkbox" value="${device.id}" onchange="app.updateEffectTarget()">
+                <span>${device.name}</span>
+            `;
+            deviceSelect.appendChild(label);
+        });
+
+        const groupSelect = document.getElementById('effectGroupSelect');
+        groupSelect.innerHTML = '';
+
+        this.groups.forEach(group => {
+            const label = document.createElement('label');
+            label.className = 'device-select-item';
+            label.innerHTML = `
+                <input type="checkbox" value="${group.id}" onchange="app.updateEffectTarget()">
+                <span>${group.name}</span>
+            `;
+            groupSelect.appendChild(label);
+        });
+    }
+
+    selectEffectTargetType(type) {
+        const deviceContainer = document.getElementById('effectTargetDevices');
+        const groupContainer = document.getElementById('effectTargetGroups');
+        const btns = document.querySelectorAll('.target-selector .btn-option');
+
+        btns.forEach(btn => {
+            if (btn.dataset.target === type) {
+                btn.classList.add('active');
+            } else {
+                btn.classList.remove('active');
+            }
+        });
+
+        if (type === 'devices') {
+            deviceContainer.style.display = 'block';
+            groupContainer.style.display = 'none';
+            this.currentEffectConfig.is_group = false;
+        } else {
+            deviceContainer.style.display = 'none';
+            groupContainer.style.display = 'block';
+            this.currentEffectConfig.is_group = true;
+        }
+    }
+
+    updateEffectTarget() {
+        const isGroup = this.currentEffectConfig.is_group;
+        const container = isGroup ?
+            document.getElementById('effectGroupSelect') :
+            document.getElementById('effectDeviceSelect');
+
+        const checkboxes = container.querySelectorAll('input[type="checkbox"]:checked');
+        this.currentEffectConfig.target_ids = Array.from(checkboxes).map(cb => cb.value);
+    }
+
+    updateEffectEditorParams() {
+        const type = document.getElementById('effectEditorType').value;
+        const paramsContainer = document.getElementById('effectEditorParams');
+
+        this.currentEffectConfig.type = type;
+
+        let paramsHTML = '';
+
+        switch (type) {
+            case 'strobe':
+                paramsHTML = `
+                    <div class="form-group">
+                        <label>Geschwindigkeit (Blitze/Sek)</label>
+                        <input type="range" id="paramSpeed" class="slider" min="1" max="20" value="10" oninput="app.updateParamValue('speed', this.value)">
+                        <div class="slider-value" id="paramSpeedValue">10 Hz</div>
+                    </div>
+                `;
+                break;
+
+            case 'rainbow':
+            case 'chase':
+            case 'color_fade':
+                paramsHTML = `
+                    <div class="form-group">
+                        <label>Geschwindigkeit</label>
+                        <input type="range" id="paramSpeed" class="slider" min="1" max="100" value="50" oninput="app.updateParamValue('speed', this.value)">
+                        <div class="slider-value" id="paramSpeedValue">50%</div>
+                    </div>
+                `;
+                break;
+
+            case 'pulse':
+                paramsHTML = `
+                    <div class="form-group">
+                        <label>Geschwindigkeit</label>
+                        <input type="range" id="paramSpeed" class="slider" min="1" max="100" value="50" oninput="app.updateParamValue('speed', this.value)">
+                        <div class="slider-value" id="paramSpeedValue">50%</div>
+                    </div>
+                    <div class="form-group">
+                        <label>Minimale Helligkeit (%)</label>
+                        <input type="range" id="paramMin" class="slider" min="0" max="100" value="0" oninput="app.updateParamValue('min', this.value)">
+                        <div class="slider-value" id="paramMinValue">0%</div>
+                    </div>
+                `;
+                break;
+
+            case 'sound_reactive':
+                paramsHTML = `
+                    <div class="form-group">
+                        <label>Effekt-Modus</label>
+                        <select id="paramMode" class="input" onchange="app.updateParamValue('mode', this.value)">
+                            <option value="flash">Flash (Blitze)</option>
+                            <option value="intensity">Intensität</option>
+                            <option value="color">Farbwechsel</option>
+                        </select>
+                    </div>
+                `;
+                break;
+
+            case 'fire':
+                paramsHTML = `
+                    <div class="form-group">
+                        <label>Geschwindigkeit</label>
+                        <input type="range" id="paramSpeed" class="slider" min="1" max="100" value="50" oninput="app.updateParamValue('speed', this.value / 1000)">
+                        <div class="slider-value" id="paramSpeedValue">50ms</div>
+                    </div>
+                    <div class="form-group">
+                        <label>Intensität</label>
+                        <input type="range" id="paramIntensity" class="slider" min="0" max="100" value="100" oninput="app.updateParamValue('intensity', this.value / 100)">
+                        <div class="slider-value" id="paramIntensityValue">100%</div>
+                    </div>
+                `;
+                break;
+
+            case 'lightning':
+                paramsHTML = `
+                    <div class="form-group">
+                        <label>Min. Verzögerung (Sek)</label>
+                        <input type="range" id="paramMinDelay" class="slider" min="1" max="10" value="5" oninput="app.updateParamValue('min_delay', this.value / 10)">
+                        <div class="slider-value" id="paramMinDelayValue">0.5s</div>
+                    </div>
+                    <div class="form-group">
+                        <label>Max. Verzögerung (Sek)</label>
+                        <input type="range" id="paramMaxDelay" class="slider" min="10" max="50" value="30" oninput="app.updateParamValue('max_delay', this.value / 10)">
+                        <div class="slider-value" id="paramMaxDelayValue">3.0s</div>
+                    </div>
+                `;
+                break;
+
+            case 'scanner':
+                paramsHTML = `
+                    <div class="form-group">
+                        <label>Geschwindigkeit</label>
+                        <input type="range" id="paramSpeed" class="slider" min="1" max="100" value="50" oninput="app.updateParamValue('speed', this.value / 500)">
+                        <div class="slider-value" id="paramSpeedValue">50%</div>
+                    </div>
+                    <div class="form-group">
+                        <label>Bewegungsbereich (Grad)</label>
+                        <input type="range" id="paramRange" class="slider" min="30" max="270" value="180" oninput="app.updateParamValue('range', this.value)">
+                        <div class="slider-value" id="paramRangeValue">180°</div>
+                    </div>
+                `;
+                break;
+
+            case 'matrix':
+                paramsHTML = `
+                    <div class="form-group">
+                        <label>Geschwindigkeit</label>
+                        <input type="range" id="paramSpeed" class="slider" min="1" max="100" value="50" oninput="app.updateParamValue('speed', this.value / 250)">
+                        <div class="slider-value" id="paramSpeedValue">50%</div>
+                    </div>
+                    <div class="form-group">
+                        <label>Muster</label>
+                        <select id="paramPattern" class="input" onchange="app.updateParamValue('pattern', this.value)">
+                            <option value="wave">Welle</option>
+                            <option value="circle">Kreis</option>
+                            <option value="checkerboard">Schachbrett</option>
+                        </select>
+                    </div>
+                `;
+                break;
+
+            case 'twinkle':
+                paramsHTML = `
+                    <div class="form-group">
+                        <label>Geschwindigkeit</label>
+                        <input type="range" id="paramSpeed" class="slider" min="1" max="100" value="50" oninput="app.updateParamValue('speed', this.value / 500)">
+                        <div class="slider-value" id="paramSpeedValue">50%</div>
+                    </div>
+                    <div class="form-group">
+                        <label>Dichte</label>
+                        <input type="range" id="paramDensity" class="slider" min="0" max="100" value="30" oninput="app.updateParamValue('density', this.value / 100)">
+                        <div class="slider-value" id="paramDensityValue">30%</div>
+                    </div>
+                `;
+                break;
+        }
+
+        paramsContainer.innerHTML = paramsHTML;
+    }
+
+    updateParamValue(param, value) {
+        this.currentEffectConfig.params[param] = parseFloat(value);
+
+        const valueDisplay = document.getElementById(`param${param.charAt(0).toUpperCase() + param.slice(1)}Value`);
+        if (valueDisplay) {
+            if (param === 'speed' && this.currentEffectConfig.type === 'strobe') {
+                valueDisplay.textContent = value + ' Hz';
+            } else {
+                valueDisplay.textContent = value + '%';
+            }
+        }
+    }
+
+    toggleSoundReactive() {
+        const checkbox = document.getElementById('effectSoundReactive');
+        const config = document.getElementById('soundReactivityConfig');
+        const visualizer = document.getElementById('soundVisualizer');
+
+        if (checkbox.checked) {
+            config.style.display = 'block';
+            visualizer.style.display = 'block';
+            this.currentEffectConfig.sound_reactive = true;
+
+            if (!this.audioAnalyzer || !this.audioAnalyzer.isActive) {
+                this.toggleSound();
+            }
+        } else {
+            config.style.display = 'none';
+            visualizer.style.display = 'none';
+            this.currentEffectConfig.sound_reactive = false;
+        }
+    }
+
+    initEffectPreview() {
+        const canvas = document.getElementById('effectPreviewCanvas');
+        if (!canvas) return;
+
+        this.previewCanvas = canvas;
+        this.previewCtx = canvas.getContext('2d');
+        this.previewAnimation = null;
+    }
+
+    previewEffect() {
+        if (!this.previewCanvas || !this.previewCtx) return;
+
+        const canvas = this.previewCanvas;
+        const ctx = this.previewCtx;
+        const width = canvas.width;
+        const height = canvas.height;
+
+        let frame = 0;
+        const type = this.currentEffectConfig.type;
+
+        const animate = () => {
+            ctx.clearRect(0, 0, width, height);
+            ctx.fillStyle = '#0f172a';
+            ctx.fillRect(0, 0, width, height);
+
+            const numLights = 8;
+            const lightWidth = (width - 40) / numLights;
+            const lightHeight = height - 40;
+
+            for (let i = 0; i < numLights; i++) {
+                const x = 20 + i * lightWidth;
+                const y = 20;
+
+                let color = '#475569';
+
+                switch (type) {
+                    case 'strobe':
+                        color = frame % 10 < 2 ? '#ffffff' : '#1e293b';
+                        break;
+
+                    case 'rainbow':
+                        const hue = (frame * 2 + i * 45) % 360;
+                        color = `hsl(${hue}, 70%, 60%)`;
+                        break;
+
+                    case 'chase':
+                        const active = Math.floor(frame / 5) % numLights;
+                        color = i === active ? '#3b82f6' : '#1e293b';
+                        break;
+
+                    case 'pulse':
+                        const intensity = (Math.sin(frame * 0.1) + 1) / 2;
+                        const brightness = Math.floor(intensity * 255);
+                        color = `rgb(${brightness}, ${brightness}, ${brightness})`;
+                        break;
+
+                    case 'color_fade':
+                        const hue2 = (frame * 3) % 360;
+                        color = `hsl(${hue2}, 70%, 60%)`;
+                        break;
+
+                    case 'sound_reactive':
+                        if (this.currentAudioData) {
+                            const level = this.currentAudioData.overall;
+                            const brightness = Math.floor(level * 255);
+                            color = `rgb(${brightness}, ${brightness / 2}, ${brightness})`;
+                        }
+                        break;
+
+                    case 'fire':
+                        const flicker = Math.random() * 0.3 + 0.7;
+                        const fireRed = Math.floor(255 * flicker);
+                        const fireGreen = Math.floor((100 * flicker) * Math.random());
+                        color = `rgb(${fireRed}, ${fireGreen}, 0)`;
+                        break;
+
+                    case 'lightning':
+                        if (frame % 60 < 3 || (frame % 60 >= 5 && frame % 60 < 7)) {
+                            color = '#ffffff';
+                        } else {
+                            color = '#1e293b';
+                        }
+                        break;
+
+                    case 'scanner':
+                        const scanPos = (Math.sin(frame * 0.05) + 1) / 2;
+                        const activeScanner = Math.floor(scanPos * numLights);
+                        color = i === activeScanner ? '#3b82f6' : '#1e293b';
+                        break;
+
+                    case 'matrix':
+                        const waveIntensity = (Math.sin(frame * 0.1 + i * 0.5) + 1) / 2;
+                        const matrixBrightness = Math.floor(waveIntensity * 255);
+                        color = `rgb(${matrixBrightness}, ${matrixBrightness}, ${matrixBrightness})`;
+                        break;
+
+                    case 'twinkle':
+                        if (Math.random() < 0.3) {
+                            const twinkleBrightness = Math.floor(Math.random() * 55 + 200);
+                            color = `rgb(${twinkleBrightness}, ${twinkleBrightness}, ${twinkleBrightness})`;
+                        } else {
+                            const dimBrightness = Math.floor(Math.random() * 50);
+                            color = `rgb(${dimBrightness}, ${dimBrightness}, ${dimBrightness})`;
+                        }
+                        break;
+                }
+
+                ctx.fillStyle = color;
+                ctx.fillRect(x, y, lightWidth - 5, lightHeight);
+            }
+
+            frame++;
+            this.previewAnimation = requestAnimationFrame(animate);
+        };
+
+        animate();
+    }
+
+    stopPreviewEffect() {
+        if (this.previewAnimation) {
+            cancelAnimationFrame(this.previewAnimation);
+            this.previewAnimation = null;
+
+            if (this.previewCtx && this.previewCanvas) {
+                this.previewCtx.fillStyle = '#0f172a';
+                this.previewCtx.fillRect(0, 0, this.previewCanvas.width, this.previewCanvas.height);
+            }
+        }
+    }
+
+    async saveEffectFromEditor() {
+        const name = document.getElementById('effectEditorName').value;
+        if (!name) {
+            this.showToast('Bitte gib einen Effekt-Namen ein', 'error');
+            return;
+        }
+
+        if (this.currentEffectConfig.target_ids.length === 0) {
+            this.showToast('Bitte wähle mindestens ein Ziel aus', 'error');
+            return;
+        }
+
+        this.currentEffectConfig.name = name;
+
+        if (this.currentEffectConfig.sound_reactive) {
+            this.currentEffectConfig.sound_config = {
+                frequency_band: document.getElementById('soundFrequencyBand').value,
+                sensitivity: parseInt(document.getElementById('soundSensitivity').value) / 100,
+                control_param: document.getElementById('soundControlParam').value
+            };
+        }
+
+        try {
+            const response = await fetch('/api/effects', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(this.currentEffectConfig)
+            });
+
+            if (response.ok) {
+                const data = await response.json();
+                this.showToast('Effekt erstellt', 'success');
+                this.closeEffectEditor();
+                this.stopPreviewEffect();
+
+                await this.startEffect(data.effect.id);
+            } else {
+                this.showToast('Fehler beim Erstellen des Effekts', 'error');
+            }
+        } catch (error) {
+            console.error('Error creating effect:', error);
+            this.showToast('Fehler beim Erstellen des Effekts', 'error');
+        }
+    }
+
+    // ===== Sequence/Timeline Management =====
+    showAddSequence() {
+        this.currentSequence = {
+            name: '',
+            steps: [],
+            loop: false
+        };
+        this.openSequenceEditor();
+    }
+
+    openSequenceEditor() {
+        const modal = document.getElementById('sequenceEditorModal');
+        modal.classList.add('active');
+
+        document.getElementById('sequenceName').value = this.currentSequence.name || '';
+        document.getElementById('sequenceLoop').checked = this.currentSequence.loop || false;
+
+        this.renderSequenceSteps();
+    }
+
+    closeSequenceEditor() {
+        const modal = document.getElementById('sequenceEditorModal');
+        modal.classList.remove('active');
+        this.currentSequence = null;
+    }
+
+    addSequenceStep(type) {
+        if (!this.currentSequence) return;
+
+        const step = {
+            type: type,
+            target_id: '',
+            duration: type === 'wait' ? 1000 : 5000
+        };
+
+        this.currentSequence.steps.push(step);
+        this.renderSequenceSteps();
+    }
+
+    removeSequenceStep(index) {
+        if (!this.currentSequence) return;
+
+        this.currentSequence.steps.splice(index, 1);
+        this.renderSequenceSteps();
+    }
+
+    updateSequenceStep(index, field, value) {
+        if (!this.currentSequence) return;
+
+        this.currentSequence.steps[index][field] = value;
+    }
+
+    renderSequenceSteps() {
+        const container = document.getElementById('sequenceSteps');
+        if (!this.currentSequence || this.currentSequence.steps.length === 0) {
+            container.innerHTML = '<p style="text-align: center; color: var(--text-secondary); padding: 2rem;">Keine Steps vorhanden. Füge einen Step hinzu!</p>';
+            return;
+        }
+
+        container.innerHTML = this.currentSequence.steps.map((step, index) => {
+            let targetOptions = '';
+
+            if (step.type === 'scene') {
+                targetOptions = this.scenes.map(scene =>
+                    `<option value="${scene.id}" ${step.target_id === scene.id ? 'selected' : ''}>${scene.name}</option>`
+                ).join('');
+            } else if (step.type === 'effect') {
+                targetOptions = this.effects.map(effect =>
+                    `<option value="${effect.id}" ${step.target_id === effect.id ? 'selected' : ''}>${effect.name}</option>`
+                ).join('');
+            }
+
+            const durationSec = (step.duration || 0) / 1000;
+
+            return `
+                <div class="sequence-step">
+                    <div class="sequence-step-number">${index + 1}</div>
+                    <div class="sequence-step-content">
+                        <div class="sequence-step-row">
+                            <span class="sequence-step-type">${step.type}</span>
+                            ${step.type !== 'wait' ? `
+                                <select class="input sequence-step-select" onchange="app.updateSequenceStep(${index}, 'target_id', this.value)">
+                                    <option value="">-- Auswählen --</option>
+                                    ${targetOptions}
+                                </select>
+                            ` : '<span style="flex: 1;">Pause</span>'}
+                        </div>
+                        <div class="sequence-step-row">
+                            <div class="sequence-step-duration">
+                                <label style="font-size: 0.875rem;">Dauer:</label>
+                                <input type="number" class="input" value="${durationSec}" min="0" step="0.5"
+                                    onchange="app.updateSequenceStep(${index}, 'duration', this.value * 1000)">
+                                <span style="font-size: 0.875rem;">Sek</span>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="sequence-step-actions">
+                        <button class="btn-icon btn-danger" onclick="app.removeSequenceStep(${index})">
+                            ×
+                        </button>
+                    </div>
+                </div>
+            `;
+        }).join('');
+    }
+
+    async saveSequence() {
+        const name = document.getElementById('sequenceName').value;
+        if (!name) {
+            this.showToast('Bitte gib einen Namen ein', 'error');
+            return;
+        }
+
+        if (!this.currentSequence.steps.length) {
+            this.showToast('Füge mindestens einen Step hinzu', 'error');
+            return;
+        }
+
+        this.currentSequence.name = name;
+        this.currentSequence.loop = document.getElementById('sequenceLoop').checked;
+
+        try {
+            const method = this.currentSequence.id ? 'PUT' : 'POST';
+            const url = this.currentSequence.id
+                ? `/api/sequences/${this.currentSequence.id}`
+                : '/api/sequences';
+
+            const response = await fetch(url, {
+                method: method,
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(this.currentSequence)
+            });
+
+            if (response.ok) {
+                this.showToast('Timeline gespeichert', 'success');
+                this.closeSequenceEditor();
+            } else {
+                this.showToast('Fehler beim Speichern', 'error');
+            }
+        } catch (error) {
+            console.error('Error saving sequence:', error);
+            this.showToast('Fehler beim Speichern', 'error');
+        }
+    }
+
+    renderSequences() {
+        const container = document.getElementById('sequencesContainer');
+
+        if (!this.sequences || this.sequences.length === 0) {
+            container.innerHTML = `
+                <div class="empty-state">
+                    <svg width="64" height="64" viewBox="0 0 64 64">
+                        <rect x="8" y="24" width="12" height="16" fill="none" stroke="currentColor" stroke-width="2" opacity="0.3"/>
+                        <rect x="26" y="16" width="12" height="32" fill="none" stroke="currentColor" stroke-width="2" opacity="0.3"/>
+                        <rect x="44" y="20" width="12" height="24" fill="none" stroke="currentColor" stroke-width="2" opacity="0.3"/>
+                    </svg>
+                    <h3>Keine Timeline vorhanden</h3>
+                    <p>Erstelle eine Timeline-Sequence für automatisierte Abläufe</p>
+                </div>
+            `;
+            return;
+        }
+
+        container.innerHTML = this.sequences.map(seq => `
+            <div class="card">
+                <div class="card-header">
+                    <h3>${seq.name}</h3>
+                    <span class="badge">${seq.steps.length} Steps</span>
+                </div>
+                <div class="card-body">
+                    <div class="card-info">
+                        ${seq.loop ? '<span class="badge">🔁 Loop</span>' : ''}
+                        <span style="font-size: 0.875rem; color: var(--text-secondary);">
+                            ${this.formatSequenceDuration(seq)}
+                        </span>
+                    </div>
+                </div>
+                <div class="card-actions">
+                    <button class="btn btn-success btn-sm" onclick="app.playSequence('${seq.id}')">
+                        <svg width="16" height="16" viewBox="0 0 16 16">
+                            <path d="M4 2 L12 8 L4 14 Z" fill="currentColor"/>
+                        </svg>
+                        Play
+                    </button>
+                    <button class="btn btn-secondary btn-sm" onclick="app.stopSequence('${seq.id}')">
+                        <svg width="16" height="16" viewBox="0 0 16 16">
+                            <rect x="4" y="4" width="8" height="8" fill="currentColor"/>
+                        </svg>
+                        Stop
+                    </button>
+                    <button class="btn btn-danger btn-sm" onclick="app.deleteSequence('${seq.id}')">
+                        <svg width="16" height="16" viewBox="0 0 16 16">
+                            <path d="M4 4 L12 12 M12 4 L4 12" stroke="currentColor" stroke-width="2"/>
+                        </svg>
+                    </button>
+                </div>
+            </div>
+        `).join('');
+    }
+
+    formatSequenceDuration(seq) {
+        const totalMs = seq.steps.reduce((sum, step) => sum + (step.duration || 0), 0);
+        const seconds = Math.floor(totalMs / 1000);
+        const minutes = Math.floor(seconds / 60);
+        const remainingSeconds = seconds % 60;
+
+        if (minutes > 0) {
+            return `${minutes}m ${remainingSeconds}s`;
+        }
+        return `${seconds}s`;
+    }
+
+    async playSequence(sequenceId) {
+        try {
+            const response = await fetch(`/api/sequences/${sequenceId}/play`, {
+                method: 'POST'
+            });
+
+            if (response.ok) {
+                this.showToast('Timeline gestartet', 'success');
+            }
+        } catch (error) {
+            console.error('Error playing sequence:', error);
+            this.showToast('Fehler beim Starten', 'error');
+        }
+    }
+
+    async stopSequence(sequenceId) {
+        try {
+            const response = await fetch(`/api/sequences/${sequenceId}/stop`, {
+                method: 'POST'
+            });
+
+            if (response.ok) {
+                this.showToast('Timeline gestoppt', 'success');
+            }
+        } catch (error) {
+            console.error('Error stopping sequence:', error);
+            this.showToast('Fehler beim Stoppen', 'error');
+        }
+    }
+
+    async deleteSequence(sequenceId) {
+        if (!confirm('Timeline wirklich löschen?')) return;
+
+        try {
+            const response = await fetch(`/api/sequences/${sequenceId}`, {
+                method: 'DELETE'
+            });
+
+            if (response.ok) {
+                this.showToast('Timeline gelöscht', 'success');
+            }
+        } catch (error) {
+            console.error('Error deleting sequence:', error);
+            this.showToast('Fehler beim Löschen', 'error');
+        }
+    }
+
+    // ===== Visual Effect Designer =====
+    openVisualDesigner() {
+        this.designerMode = 'spot';
+        this.designerKeyframes = [];
+        this.currentKeyframeIndex = -1;
+        this.previewPlaying = false;
+        this.previewProgress = 0;
+
+        // Populate devices dropdown
+        const select = document.getElementById('customEffectDevices');
+        select.innerHTML = '';
+        this.devices.forEach(device => {
+            const option = document.createElement('option');
+            option.value = device.id;
+            option.textContent = device.name;
+            select.appendChild(option);
+        });
+
+        // Initialize timeline
+        this.initializeTimeline();
+
+        // Show modal
+        document.getElementById('visualDesignerModal').classList.add('active');
+
+        // Add default keyframes
+        this.designerKeyframes = [
+            { time: 0, values: { default: [255, 255, 255] }, easing: 'linear' },
+            { time: 100, values: { default: [255, 0, 0] }, easing: 'linear' }
+        ];
+        this.drawTimeline();
+    }
+
+    closeVisualDesigner() {
+        if (this.previewPlaying) {
+            this.stopPreview();
+        }
+        document.getElementById('visualDesignerModal').classList.remove('active');
+        this.designerKeyframes = [];
+        this.currentKeyframeIndex = -1;
+    }
+
+    setDesignerMode(mode) {
+        this.designerMode = mode;
+
+        // Update button states
+        document.querySelectorAll('[data-mode]').forEach(btn => {
+            btn.classList.remove('active');
+            if (btn.dataset.mode === mode) {
+                btn.classList.add('active');
+            }
+        });
+
+        // Show/hide appropriate editors
+        document.getElementById('spotKeyframeEditor').style.display = mode === 'spot' ? 'block' : 'none';
+        document.getElementById('stripKeyframeEditor').style.display = mode === 'strip' ? 'block' : 'none';
+
+        // Reset keyframes when switching modes (they have different structures)
+        this.designerKeyframes = [];
+        this.currentKeyframeIndex = -1;
+        document.getElementById('keyframeEditor').style.display = 'none';
+
+        // Initialize default keyframes for the new mode
+        if (mode === 'spot') {
+            this.designerKeyframes = [
+                { time: 0, values: { default: [255, 255, 255] }, easing: 'linear' },
+                { time: 100, values: { default: [255, 0, 0] }, easing: 'linear' }
+            ];
+        } else {
+            this.designerKeyframes = [
+                { time: 0, pattern_type: 'solid', pattern: { color: [255, 255, 255] }, easing: 'linear' },
+                { time: 100, pattern_type: 'solid', pattern: { color: [255, 0, 0] }, easing: 'linear' }
+            ];
+        }
+
+        this.drawTimeline();
+    }
+
+    initializeTimeline() {
+        const canvas = document.getElementById('timelineCanvas');
+        const ctx = canvas.getContext('2d');
+
+        // Make canvas responsive
+        const container = canvas.parentElement;
+        canvas.width = container.offsetWidth - 32; // Subtract padding
+        canvas.height = 120;
+
+        // Click handler
+        canvas.addEventListener('click', (e) => {
+            const rect = canvas.getBoundingClientRect();
+            const x = e.clientX - rect.left;
+            const y = e.clientY - rect.top;
+
+            // Check if clicked on keyframe
+            for (let i = 0; i < this.designerKeyframes.length; i++) {
+                const kf = this.designerKeyframes[i];
+                const kfX = (kf.time / 100) * canvas.width;
+                const kfY = canvas.height / 2;
+
+                const distance = Math.sqrt((x - kfX) ** 2 + (y - kfY) ** 2);
+                if (distance < 10) {
+                    this.selectKeyframe(i);
+                    return;
+                }
+            }
+        });
+
+        this.drawTimeline();
+    }
+
+    drawTimeline() {
+        const canvas = document.getElementById('timelineCanvas');
+        if (!canvas) return;
+
+        const ctx = canvas.getContext('2d');
+        const width = canvas.width;
+        const height = canvas.height;
+
+        // Clear canvas
+        ctx.fillStyle = '#1e293b';
+        ctx.fillRect(0, 0, width, height);
+
+        // Draw grid lines
+        ctx.strokeStyle = '#334155';
+        ctx.lineWidth = 1;
+        for (let i = 0; i <= 10; i++) {
+            const x = (i / 10) * width;
+            ctx.beginPath();
+            ctx.moveTo(x, 0);
+            ctx.lineTo(x, height);
+            ctx.stroke();
+
+            // Draw time labels
+            ctx.fillStyle = '#94a3b8';
+            ctx.font = '10px sans-serif';
+            ctx.fillText(`${i * 10}%`, x + 2, 12);
+        }
+
+        // Draw center line
+        ctx.strokeStyle = '#475569';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(0, height / 2);
+        ctx.lineTo(width, height / 2);
+        ctx.stroke();
+
+        // Draw keyframe curve
+        if (this.designerKeyframes.length > 1) {
+            ctx.strokeStyle = '#3b82f6';
+            ctx.lineWidth = 3;
+            ctx.beginPath();
+
+            const sorted = [...this.designerKeyframes].sort((a, b) => a.time - b.time);
+            sorted.forEach((kf, i) => {
+                const x = (kf.time / 100) * width;
+                const y = height / 2;
+
+                if (i === 0) {
+                    ctx.moveTo(x, y);
+                } else {
+                    ctx.lineTo(x, y);
+                }
+            });
+            ctx.stroke();
+        }
+
+        // Draw keyframes
+        this.designerKeyframes.forEach((kf, index) => {
+            const x = (kf.time / 100) * width;
+            const y = height / 2;
+
+            ctx.fillStyle = index === this.currentKeyframeIndex ? '#3b82f6' : '#f59e0b';
+            ctx.beginPath();
+            ctx.arc(x, y, 6, 0, Math.PI * 2);
+            ctx.fill();
+
+            ctx.strokeStyle = '#0f172a';
+            ctx.lineWidth = 2;
+            ctx.stroke();
+        });
+    }
+
+    addKeyframe() {
+        const duration = parseFloat(document.getElementById('customEffectDuration').value) || 10;
+        const newTime = this.designerKeyframes.length > 0
+            ? Math.min(100, this.designerKeyframes[this.designerKeyframes.length - 1].time + 10)
+            : 50;
+
+        let newKeyframe;
+
+        if (this.designerMode === 'spot') {
+            newKeyframe = {
+                time: newTime,
+                values: { default: [255, 255, 255] },
+                easing: 'linear'
+            };
+        } else {
+            newKeyframe = {
+                time: newTime,
+                pattern_type: 'solid',
+                pattern: { color: [255, 255, 255] },
+                easing: 'linear'
+            };
+        }
+
+        this.designerKeyframes.push(newKeyframe);
+        this.drawTimeline();
+        this.selectKeyframe(this.designerKeyframes.length - 1);
+        this.showToast('Keyframe hinzugefügt', 'success');
+    }
+
+    selectKeyframe(index) {
+        this.currentKeyframeIndex = index;
+        const kf = this.designerKeyframes[index];
+
+        // Show keyframe editor
+        document.getElementById('keyframeEditor').style.display = 'block';
+
+        if (this.designerMode === 'spot') {
+            // Populate spot keyframe editor
+            document.getElementById('kfPosition').value = kf.time;
+            document.getElementById('kfPositionValue').textContent = kf.time + '%';
+
+            const rgb = kf.values.default || [255, 255, 255];
+            document.getElementById('kfRed').value = rgb[0];
+            document.getElementById('kfGreen').value = rgb[1];
+            document.getElementById('kfBlue').value = rgb[2];
+
+            const hexColor = '#' + rgb.map(v => v.toString(16).padStart(2, '0')).join('');
+            document.getElementById('kfColor').value = hexColor;
+
+            document.getElementById('kfEasing').value = kf.easing || 'linear';
+
+            // Setup event listeners
+            const updateColor = () => {
+                const r = parseInt(document.getElementById('kfRed').value) || 0;
+                const g = parseInt(document.getElementById('kfGreen').value) || 0;
+                const b = parseInt(document.getElementById('kfBlue').value) || 0;
+                const hex = '#' + [r, g, b].map(v => v.toString(16).padStart(2, '0')).join('');
+                document.getElementById('kfColor').value = hex;
+            };
+
+            document.getElementById('kfRed').onchange = updateColor;
+            document.getElementById('kfGreen').onchange = updateColor;
+            document.getElementById('kfBlue').onchange = updateColor;
+
+            document.getElementById('kfColor').onchange = (e) => {
+                const hex = e.target.value;
+                const r = parseInt(hex.substr(1, 2), 16);
+                const g = parseInt(hex.substr(3, 2), 16);
+                const b = parseInt(hex.substr(5, 2), 16);
+                document.getElementById('kfRed').value = r;
+                document.getElementById('kfGreen').value = g;
+                document.getElementById('kfBlue').value = b;
+            };
+
+            document.getElementById('kfPosition').oninput = (e) => {
+                document.getElementById('kfPositionValue').textContent = e.target.value + '%';
+            };
+        } else {
+            // Populate strip keyframe editor
+            document.getElementById('stripKfPosition').value = kf.time;
+            document.getElementById('stripKfPositionValue').textContent = kf.time + '%';
+            document.getElementById('stripPattern').value = kf.pattern_type || 'solid';
+
+            this.updateStripPattern();
+
+            // Load pattern parameters if they exist
+            if (kf.pattern) {
+                if (kf.pattern_type === 'solid' && kf.pattern.color) {
+                    const hex = '#' + kf.pattern.color.map(v => v.toString(16).padStart(2, '0')).join('');
+                    document.getElementById('stripColor').value = hex;
+                } else if (kf.pattern_type === 'gradient') {
+                    if (kf.pattern.start_color) {
+                        const startHex = '#' + kf.pattern.start_color.map(v => v.toString(16).padStart(2, '0')).join('');
+                        document.getElementById('gradientStart').value = startHex;
+                    }
+                    if (kf.pattern.end_color) {
+                        const endHex = '#' + kf.pattern.end_color.map(v => v.toString(16).padStart(2, '0')).join('');
+                        document.getElementById('gradientEnd').value = endHex;
+                    }
+                } else if (kf.pattern_type === 'wave') {
+                    if (kf.pattern.color) {
+                        const hex = '#' + kf.pattern.color.map(v => v.toString(16).padStart(2, '0')).join('');
+                        document.getElementById('waveColor').value = hex;
+                    }
+                    if (kf.pattern.wavelength !== undefined) {
+                        document.getElementById('waveLength').value = kf.pattern.wavelength;
+                        document.getElementById('waveLengthValue').textContent = kf.pattern.wavelength;
+                    }
+                    if (kf.pattern.amplitude !== undefined) {
+                        document.getElementById('waveAmplitude').value = kf.pattern.amplitude;
+                        document.getElementById('waveAmplitudeValue').textContent = kf.pattern.amplitude;
+                    }
+                } else if (kf.pattern_type === 'chase') {
+                    if (kf.pattern.color) {
+                        const hex = '#' + kf.pattern.color.map(v => v.toString(16).padStart(2, '0')).join('');
+                        document.getElementById('chaseColor').value = hex;
+                    }
+                    if (kf.pattern.width !== undefined) {
+                        document.getElementById('chaseWidth').value = kf.pattern.width;
+                        document.getElementById('chaseWidthValue').textContent = kf.pattern.width;
+                    }
+                }
+            }
+
+            document.getElementById('stripKfPosition').oninput = (e) => {
+                document.getElementById('stripKfPositionValue').textContent = e.target.value + '%';
+            };
+        }
+
+        this.drawTimeline();
+    }
+
+    updateStripPattern() {
+        const patternType = document.getElementById('stripPattern').value;
+
+        // Hide all pattern settings
+        document.querySelectorAll('.pattern-settings').forEach(el => {
+            el.style.display = 'none';
+        });
+
+        // Show selected pattern settings
+        if (patternType === 'solid') {
+            document.getElementById('solidSettings').style.display = 'block';
+        } else if (patternType === 'gradient') {
+            document.getElementById('gradientSettings').style.display = 'block';
+        } else if (patternType === 'wave') {
+            document.getElementById('waveSettings').style.display = 'block';
+
+            // Setup event listeners
+            document.getElementById('waveLength').oninput = (e) => {
+                document.getElementById('waveLengthValue').textContent = e.target.value;
+            };
+            document.getElementById('waveAmplitude').oninput = (e) => {
+                document.getElementById('waveAmplitudeValue').textContent = e.target.value;
+            };
+        } else if (patternType === 'chase') {
+            document.getElementById('chaseSettings').style.display = 'block';
+
+            document.getElementById('chaseWidth').oninput = (e) => {
+                document.getElementById('chaseWidthValue').textContent = e.target.value;
+            };
+        }
+    }
+
+    saveCurrentKeyframe() {
+        if (this.currentKeyframeIndex < 0) return;
+
+        const kf = this.designerKeyframes[this.currentKeyframeIndex];
+
+        if (this.designerMode === 'spot') {
+            kf.time = parseFloat(document.getElementById('kfPosition').value);
+            kf.values = {
+                default: [
+                    parseInt(document.getElementById('kfRed').value) || 0,
+                    parseInt(document.getElementById('kfGreen').value) || 0,
+                    parseInt(document.getElementById('kfBlue').value) || 0
+                ]
+            };
+            kf.easing = document.getElementById('kfEasing').value;
+        } else {
+            kf.time = parseFloat(document.getElementById('stripKfPosition').value);
+            kf.pattern_type = document.getElementById('stripPattern').value;
+            kf.easing = 'linear'; // Default easing for strips
+
+            if (kf.pattern_type === 'solid') {
+                const hex = document.getElementById('stripColor').value;
+                const r = parseInt(hex.substr(1, 2), 16);
+                const g = parseInt(hex.substr(3, 2), 16);
+                const b = parseInt(hex.substr(5, 2), 16);
+                kf.pattern = { color: [r, g, b] };
+            } else if (kf.pattern_type === 'gradient') {
+                const startHex = document.getElementById('gradientStart').value;
+                const endHex = document.getElementById('gradientEnd').value;
+                kf.pattern = {
+                    start_color: [
+                        parseInt(startHex.substr(1, 2), 16),
+                        parseInt(startHex.substr(3, 2), 16),
+                        parseInt(startHex.substr(5, 2), 16)
+                    ],
+                    end_color: [
+                        parseInt(endHex.substr(1, 2), 16),
+                        parseInt(endHex.substr(3, 2), 16),
+                        parseInt(endHex.substr(5, 2), 16)
+                    ]
+                };
+            } else if (kf.pattern_type === 'wave') {
+                const hex = document.getElementById('waveColor').value;
+                kf.pattern = {
+                    color: [
+                        parseInt(hex.substr(1, 2), 16),
+                        parseInt(hex.substr(3, 2), 16),
+                        parseInt(hex.substr(5, 2), 16)
+                    ],
+                    wavelength: parseInt(document.getElementById('waveLength').value),
+                    amplitude: parseInt(document.getElementById('waveAmplitude').value)
+                };
+            } else if (kf.pattern_type === 'chase') {
+                const hex = document.getElementById('chaseColor').value;
+                kf.pattern = {
+                    color: [
+                        parseInt(hex.substr(1, 2), 16),
+                        parseInt(hex.substr(3, 2), 16),
+                        parseInt(hex.substr(5, 2), 16)
+                    ],
+                    width: parseInt(document.getElementById('chaseWidth').value)
+                };
+            }
+        }
+
+        this.drawTimeline();
+        this.showToast('Keyframe aktualisiert', 'success');
+    }
+
+    deleteCurrentKeyframe() {
+        if (this.currentKeyframeIndex < 0) return;
+
+        if (this.designerKeyframes.length <= 2) {
+            this.showToast('Mindestens 2 Keyframes erforderlich', 'error');
+            return;
+        }
+
+        this.designerKeyframes.splice(this.currentKeyframeIndex, 1);
+        this.currentKeyframeIndex = -1;
+        document.getElementById('keyframeEditor').style.display = 'none';
+        this.drawTimeline();
+        this.showToast('Keyframe gelöscht', 'success');
+    }
+
+    playPreview() {
+        if (this.previewPlaying) {
+            this.stopPreview();
+            return;
+        }
+
+        this.previewPlaying = true;
+        document.getElementById('playIcon').textContent = '⏸️';
+
+        const duration = parseFloat(document.getElementById('customEffectDuration').value) || 10;
+        const startTime = Date.now();
+
+        const animate = () => {
+            if (!this.previewPlaying) return;
+
+            const elapsed = (Date.now() - startTime) / 1000;
+            this.previewProgress = (elapsed % duration) / duration;
+
+            // Update scrubber
+            const canvas = document.getElementById('timelineCanvas');
+            const scrubber = document.getElementById('timelineScrubber');
+            if (canvas && scrubber) {
+                const x = this.previewProgress * canvas.width + 16; // Add container padding
+                scrubber.style.left = x + 'px';
+            }
+
+            // Update time display
+            document.getElementById('timelineTime').textContent = elapsed.toFixed(1) + 's';
+
+            this.previewAnimationFrame = requestAnimationFrame(animate);
+        };
+
+        animate();
+    }
+
+    stopPreview() {
+        this.previewPlaying = false;
+        document.getElementById('playIcon').textContent = '▶️';
+        if (this.previewAnimationFrame) {
+            cancelAnimationFrame(this.previewAnimationFrame);
+        }
+
+        // Reset scrubber
+        document.getElementById('timelineScrubber').style.left = '16px';
+        document.getElementById('timelineTime').textContent = '0.0s';
+    }
+
+    loadTemplate(templateName) {
+        if (this.designerMode === 'spot') {
+            switch (templateName) {
+                case 'fade':
+                    this.designerKeyframes = [
+                        { time: 0, values: { default: [0, 0, 0] }, easing: 'linear' },
+                        { time: 50, values: { default: [255, 255, 255] }, easing: 'ease-in-out' },
+                        { time: 100, values: { default: [0, 0, 0] }, easing: 'linear' }
+                    ];
+                    break;
+                case 'pulse':
+                    this.designerKeyframes = [
+                        { time: 0, values: { default: [50, 50, 50] }, easing: 'ease-in' },
+                        { time: 50, values: { default: [255, 255, 255] }, easing: 'ease-out' },
+                        { time: 100, values: { default: [50, 50, 50] }, easing: 'linear' }
+                    ];
+                    break;
+                case 'colorCycle':
+                    this.designerKeyframes = [
+                        { time: 0, values: { default: [255, 0, 0] }, easing: 'linear' },
+                        { time: 33, values: { default: [0, 255, 0] }, easing: 'linear' },
+                        { time: 66, values: { default: [0, 0, 255] }, easing: 'linear' },
+                        { time: 100, values: { default: [255, 0, 0] }, easing: 'linear' }
+                    ];
+                    break;
+                case 'strobe':
+                    this.designerKeyframes = [
+                        { time: 0, values: { default: [0, 0, 0] }, easing: 'linear' },
+                        { time: 10, values: { default: [255, 255, 255] }, easing: 'linear' },
+                        { time: 20, values: { default: [0, 0, 0] }, easing: 'linear' },
+                        { time: 30, values: { default: [255, 255, 255] }, easing: 'linear' },
+                        { time: 40, values: { default: [0, 0, 0] }, easing: 'linear' }
+                    ];
+                    break;
+            }
+        } else {
+            // Strip mode templates
+            switch (templateName) {
+                case 'fade':
+                    this.designerKeyframes = [
+                        { time: 0, pattern_type: 'solid', pattern: { color: [0, 0, 0] }, easing: 'linear' },
+                        { time: 50, pattern_type: 'solid', pattern: { color: [255, 255, 255] }, easing: 'ease-in-out' },
+                        { time: 100, pattern_type: 'solid', pattern: { color: [0, 0, 0] }, easing: 'linear' }
+                    ];
+                    break;
+                case 'pulse':
+                    this.designerKeyframes = [
+                        { time: 0, pattern_type: 'solid', pattern: { color: [50, 50, 50] }, easing: 'ease-in' },
+                        { time: 50, pattern_type: 'solid', pattern: { color: [255, 255, 255] }, easing: 'ease-out' },
+                        { time: 100, pattern_type: 'solid', pattern: { color: [50, 50, 50] }, easing: 'linear' }
+                    ];
+                    break;
+                case 'colorCycle':
+                    this.designerKeyframes = [
+                        { time: 0, pattern_type: 'solid', pattern: { color: [255, 0, 0] }, easing: 'linear' },
+                        { time: 33, pattern_type: 'solid', pattern: { color: [0, 255, 0] }, easing: 'linear' },
+                        { time: 66, pattern_type: 'solid', pattern: { color: [0, 0, 255] }, easing: 'linear' },
+                        { time: 100, pattern_type: 'solid', pattern: { color: [255, 0, 0] }, easing: 'linear' }
+                    ];
+                    break;
+                case 'strobe':
+                    this.designerKeyframes = [
+                        { time: 0, pattern_type: 'solid', pattern: { color: [0, 0, 0] }, easing: 'linear' },
+                        { time: 10, pattern_type: 'solid', pattern: { color: [255, 255, 255] }, easing: 'linear' },
+                        { time: 20, pattern_type: 'solid', pattern: { color: [0, 0, 0] }, easing: 'linear' },
+                        { time: 30, pattern_type: 'solid', pattern: { color: [255, 255, 255] }, easing: 'linear' },
+                        { time: 40, pattern_type: 'solid', pattern: { color: [0, 0, 0] }, easing: 'linear' }
+                    ];
+                    break;
+            }
+        }
+
+        this.drawTimeline();
+        this.showToast(`Template "${templateName}" geladen`, 'success');
+    }
+
+    async saveCustomEffect() {
+        const name = document.getElementById('customEffectName').value.trim();
+        if (!name) {
+            this.showToast('Bitte Namen eingeben', 'error');
+            return;
+        }
+
+        const select = document.getElementById('customEffectDevices');
+        const selectedDevices = Array.from(select.selectedOptions).map(opt => opt.value);
+
+        if (selectedDevices.length === 0) {
+            this.showToast('Bitte mindestens ein Gerät auswählen', 'error');
+            return;
+        }
+
+        const duration = parseFloat(document.getElementById('customEffectDuration').value) || 10;
+
+        const effect = {
+            name: name,
+            type: 'custom',
+            target_ids: selectedDevices,
+            params: {
+                keyframes: this.designerKeyframes,
+                duration: duration,
+                mode: this.designerMode
+            },
+            is_group: false
+        };
+
+        try {
+            const response = await fetch('/api/effects', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(effect)
+            });
+
+            if (response.ok) {
+                this.showToast('Custom Effect erstellt', 'success');
+                this.closeVisualDesigner();
+
+                // Ask if user wants to start it immediately
+                if (confirm('Effekt jetzt starten?')) {
+                    const data = await response.json();
+                    if (data.effect && data.effect.id) {
+                        await this.startEffect(data.effect.id);
+                    }
+                }
+            }
+        } catch (error) {
+            console.error('Error creating custom effect:', error);
+            this.showToast('Fehler beim Erstellen', 'error');
+        }
+    }
+}
+
+const app = new DMXController();
