@@ -1943,6 +1943,8 @@ class DMXController {
     createSpotKeyframeEditor(kf, index) {
         const rgb = kf.values.default || [255, 255, 255];
         const hexColor = '#' + rgb.map(v => v.toString(16).padStart(2, '0')).join('');
+        const intensity = kf.intensity !== undefined ? kf.intensity : 100;
+        const strobe = kf.strobe || { enabled: false, frequency: 5 };
 
         return `
             <div class="form-group">
@@ -1950,6 +1952,13 @@ class DMXController {
                 <input type="range" id="kfPos_${index}" min="0" max="100" value="${kf.time}" class="input-range" data-kf-index="${index}">
                 <span id="kfPosValue_${index}">${kf.time.toFixed(1)}%</span>
             </div>
+
+            <div class="form-group">
+                <label>💡 Intensität / Helligkeit</label>
+                <input type="range" id="kfIntensity_${index}" min="0" max="100" value="${intensity}" class="input-range" data-kf-index="${index}">
+                <span id="kfIntensityValue_${index}">${intensity}%</span>
+            </div>
+
             <div class="form-group">
                 <label>Farbe</label>
                 <div class="color-picker-group">
@@ -1961,8 +1970,24 @@ class DMXController {
                     </div>
                 </div>
             </div>
+
             <div class="form-group">
-                <label>Easing</label>
+                <label class="checkbox-label">
+                    <input type="checkbox" id="kfStrobeEnabled_${index}" ${strobe.enabled ? 'checked' : ''} data-kf-index="${index}">
+                    <span>⚡ Strobe/Flash aktivieren</span>
+                </label>
+            </div>
+
+            <div id="kfStrobeSettings_${index}" class="strobe-settings" style="display: ${strobe.enabled ? 'block' : 'none'}; margin-left: 1.5rem;">
+                <div class="form-group">
+                    <label>Strobe Frequenz</label>
+                    <input type="range" id="kfStrobeFreq_${index}" min="1" max="20" value="${strobe.frequency}" class="input-range" data-kf-index="${index}">
+                    <span id="kfStrobeFreqValue_${index}">${strobe.frequency} Hz</span>
+                </div>
+            </div>
+
+            <div class="form-group">
+                <label>Übergang (Easing)</label>
                 <select id="kfEasing_${index}" class="input" data-kf-index="${index}">
                     <option value="linear" ${kf.easing === 'linear' ? 'selected' : ''}>Linear</option>
                     <option value="ease-in" ${kf.easing === 'ease-in' ? 'selected' : ''}>Ease In</option>
@@ -1972,7 +1997,7 @@ class DMXController {
             </div>
             <div class="keyframe-actions-inline">
                 <button class="btn btn-secondary btn-sm" onclick="app.deleteKeyframeByIndex(${index})">
-                    Löschen
+                    🗑️ Löschen
                 </button>
             </div>
         `;
@@ -1981,6 +2006,8 @@ class DMXController {
     createStripKeyframeEditor(kf, index) {
         const color = kf.pattern?.color || [255, 255, 255];
         const hexColor = '#' + color.map(v => v.toString(16).padStart(2, '0')).join('');
+        const intensity = kf.intensity !== undefined ? kf.intensity : 100;
+        const speed = kf.pattern?.speed !== undefined ? kf.pattern.speed : 5;
 
         return `
             <div class="form-group">
@@ -1988,22 +2015,40 @@ class DMXController {
                 <input type="range" id="kfPos_${index}" min="0" max="100" value="${kf.time}" class="input-range" data-kf-index="${index}">
                 <span id="kfPosValue_${index}">${kf.time.toFixed(1)}%</span>
             </div>
+
+            <div class="form-group">
+                <label>💡 Intensität / Helligkeit</label>
+                <input type="range" id="kfIntensity_${index}" min="0" max="100" value="${intensity}" class="input-range" data-kf-index="${index}">
+                <span id="kfIntensityValue_${index}">${intensity}%</span>
+            </div>
+
             <div class="form-group">
                 <label>Pattern-Typ</label>
                 <select id="kfPattern_${index}" class="input" data-kf-index="${index}">
-                    <option value="solid" ${kf.pattern_type === 'solid' ? 'selected' : ''}>Einfarbig</option>
-                    <option value="gradient" ${kf.pattern_type === 'gradient' ? 'selected' : ''}>Gradient</option>
-                    <option value="wave" ${kf.pattern_type === 'wave' ? 'selected' : ''}>Welle</option>
-                    <option value="chase" ${kf.pattern_type === 'chase' ? 'selected' : ''}>Lauflicht</option>
+                    <option value="solid" ${kf.pattern_type === 'solid' ? 'selected' : ''}>🎨 Einfarbig</option>
+                    <option value="gradient" ${kf.pattern_type === 'gradient' ? 'selected' : ''}>🌈 Gradient</option>
+                    <option value="rainbow" ${kf.pattern_type === 'rainbow' ? 'selected' : ''}>🌟 Regenbogen</option>
+                    <option value="wave" ${kf.pattern_type === 'wave' ? 'selected' : ''}>〰️ Welle</option>
+                    <option value="chase" ${kf.pattern_type === 'chase' ? 'selected' : ''}>➡️ Lauflicht</option>
+                    <option value="sparkle" ${kf.pattern_type === 'sparkle' ? 'selected' : ''}>✨ Funkeln</option>
+                    <option value="strobe" ${kf.pattern_type === 'strobe' ? 'selected' : ''}>⚡ Stroboskop</option>
                 </select>
             </div>
+
             <div class="form-group">
                 <label>Farbe</label>
                 <input type="color" id="kfColor_${index}" value="${hexColor}" class="color-input" data-kf-index="${index}">
             </div>
+
+            <div class="form-group">
+                <label>Geschwindigkeit / Speed</label>
+                <input type="range" id="kfSpeed_${index}" min="1" max="10" value="${speed}" class="input-range" data-kf-index="${index}">
+                <span id="kfSpeedValue_${index}">${speed}</span>
+            </div>
+
             <div class="keyframe-actions-inline">
                 <button class="btn btn-secondary btn-sm" onclick="app.deleteKeyframeByIndex(${index})">
-                    Löschen
+                    🗑️ Löschen
                 </button>
             </div>
         `;
@@ -2085,6 +2130,65 @@ class DMXController {
             select.onchange = (e) => {
                 this.designerKeyframes[index].pattern_type = e.target.value;
                 this.updateKeyframeList();
+                this.renderEffectPreview();
+            };
+        });
+
+        // Intensity sliders
+        document.querySelectorAll('[id^="kfIntensity_"]').forEach(input => {
+            const index = parseInt(input.dataset.kfIndex);
+            input.oninput = (e) => {
+                const value = parseInt(e.target.value);
+                document.getElementById(`kfIntensityValue_${index}`).textContent = value + '%';
+                this.designerKeyframes[index].intensity = value;
+                this.renderEffectPreview();
+            };
+        });
+
+        // Strobe enable checkboxes
+        document.querySelectorAll('[id^="kfStrobeEnabled_"]').forEach(checkbox => {
+            const index = parseInt(checkbox.dataset.kfIndex);
+            checkbox.onchange = (e) => {
+                const enabled = e.target.checked;
+                if (!this.designerKeyframes[index].strobe) {
+                    this.designerKeyframes[index].strobe = { enabled: false, frequency: 5 };
+                }
+                this.designerKeyframes[index].strobe.enabled = enabled;
+
+                // Show/hide strobe settings
+                const settings = document.getElementById(`kfStrobeSettings_${index}`);
+                if (settings) {
+                    settings.style.display = enabled ? 'block' : 'none';
+                }
+                this.renderEffectPreview();
+            };
+        });
+
+        // Strobe frequency sliders
+        document.querySelectorAll('[id^="kfStrobeFreq_"]').forEach(input => {
+            const index = parseInt(input.dataset.kfIndex);
+            input.oninput = (e) => {
+                const value = parseInt(e.target.value);
+                document.getElementById(`kfStrobeFreqValue_${index}`).textContent = value + ' Hz';
+                if (!this.designerKeyframes[index].strobe) {
+                    this.designerKeyframes[index].strobe = { enabled: true, frequency: 5 };
+                }
+                this.designerKeyframes[index].strobe.frequency = value;
+                this.renderEffectPreview();
+            };
+        });
+
+        // Speed sliders (strip mode)
+        document.querySelectorAll('[id^="kfSpeed_"]').forEach(input => {
+            const index = parseInt(input.dataset.kfIndex);
+            input.oninput = (e) => {
+                const value = parseInt(e.target.value);
+                document.getElementById(`kfSpeedValue_${index}`).textContent = value;
+                if (!this.designerKeyframes[index].pattern) {
+                    this.designerKeyframes[index].pattern = {};
+                }
+                this.designerKeyframes[index].pattern.speed = value;
+                this.renderEffectPreview();
             };
         });
     }
@@ -2520,6 +2624,21 @@ class DMXController {
             return;
         }
 
+        // Get color and intensity at current progress
+        const colorData = this.getColorAtProgress(progress);
+        const color = colorData.color;
+        const intensity = colorData.intensity / 100;
+        const strobe = colorData.strobe;
+
+        // Apply strobe effect
+        let strobeActive = true;
+        if (strobe && strobe.enabled) {
+            const time = Date.now() / 1000;
+            const cycleTime = 1 / strobe.frequency;
+            const cycleProgress = (time % cycleTime) / cycleTime;
+            strobeActive = cycleProgress < 0.5; // 50% duty cycle
+        }
+
         // Calculate number of lights to show (simulate multiple devices)
         const numLights = this.designerMode === 'spot' ? 8 : 1;
         const lightWidth = width / numLights;
@@ -2527,16 +2646,21 @@ class DMXController {
         if (this.designerMode === 'spot') {
             // Spot mode: show individual lights
             for (let i = 0; i < numLights; i++) {
-                const color = this.getColorAtProgress(progress);
+                if (!strobeActive) continue;
 
                 const x = i * lightWidth + lightWidth / 2;
                 const radius = Math.min(lightWidth * 0.4, height * 0.4);
 
+                // Apply intensity to color
+                const r = Math.round(color[0] * intensity);
+                const g = Math.round(color[1] * intensity);
+                const b = Math.round(color[2] * intensity);
+
                 // Draw light with glow
                 const gradient = ctx.createRadialGradient(x, height / 2, 0, x, height / 2, radius);
-                gradient.addColorStop(0, `rgba(${color[0]}, ${color[1]}, ${color[2]}, 1)`);
-                gradient.addColorStop(0.5, `rgba(${color[0]}, ${color[1]}, ${color[2]}, 0.6)`);
-                gradient.addColorStop(1, `rgba(${color[0]}, ${color[1]}, ${color[2]}, 0)`);
+                gradient.addColorStop(0, `rgba(${r}, ${g}, ${b}, 1)`);
+                gradient.addColorStop(0.5, `rgba(${r}, ${g}, ${b}, 0.6)`);
+                gradient.addColorStop(1, `rgba(${r}, ${g}, ${b}, 0)`);
 
                 ctx.fillStyle = gradient;
                 ctx.beginPath();
@@ -2549,9 +2673,14 @@ class DMXController {
             const ledWidth = width / ledCount;
 
             for (let i = 0; i < ledCount; i++) {
-                const color = this.getColorAtProgress(progress);
+                if (!strobeActive) continue;
 
-                ctx.fillStyle = `rgb(${color[0]}, ${color[1]}, ${color[2]})`;
+                // Apply intensity to color
+                const r = Math.round(color[0] * intensity);
+                const g = Math.round(color[1] * intensity);
+                const b = Math.round(color[2] * intensity);
+
+                ctx.fillStyle = `rgb(${r}, ${g}, ${b})`;
                 ctx.fillRect(i * ledWidth, height * 0.3, ledWidth - 2, height * 0.4);
             }
         }
@@ -2568,7 +2697,7 @@ class DMXController {
 
     getColorAtProgress(progress) {
         if (this.designerKeyframes.length === 0) {
-            return [0, 0, 0];
+            return { color: [0, 0, 0], intensity: 100, strobe: null };
         }
 
         // Sort keyframes by time
@@ -2588,10 +2717,18 @@ class DMXController {
 
         // If exactly on a keyframe
         if (beforeKf.time === progress) {
-            return this.extractColor(beforeKf);
+            return {
+                color: this.extractColor(beforeKf),
+                intensity: beforeKf.intensity !== undefined ? beforeKf.intensity : 100,
+                strobe: beforeKf.strobe || null
+            };
         }
         if (afterKf.time === progress) {
-            return this.extractColor(afterKf);
+            return {
+                color: this.extractColor(afterKf),
+                intensity: afterKf.intensity !== undefined ? afterKf.intensity : 100,
+                strobe: afterKf.strobe || null
+            };
         }
 
         // Interpolate between keyframes
@@ -2602,11 +2739,22 @@ class DMXController {
         // Apply easing
         const easedT = this.applyEasing(t, beforeKf.easing || 'linear');
 
-        return [
+        // Interpolate color
+        const color = [
             Math.round(beforeColor[0] + (afterColor[0] - beforeColor[0]) * easedT),
             Math.round(beforeColor[1] + (afterColor[1] - beforeColor[1]) * easedT),
             Math.round(beforeColor[2] + (afterColor[2] - beforeColor[2]) * easedT)
         ];
+
+        // Interpolate intensity
+        const beforeIntensity = beforeKf.intensity !== undefined ? beforeKf.intensity : 100;
+        const afterIntensity = afterKf.intensity !== undefined ? afterKf.intensity : 100;
+        const intensity = Math.round(beforeIntensity + (afterIntensity - beforeIntensity) * easedT);
+
+        // Use strobe from before keyframe (strobe is a discrete property)
+        const strobe = beforeKf.strobe || null;
+
+        return { color, intensity, strobe };
     }
 
     extractColor(keyframe) {
