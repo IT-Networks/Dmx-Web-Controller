@@ -16,6 +16,12 @@ class DMXController {
         this.currentEffect = null;
         this.reconnectInterval = null;
 
+        // Truss system
+        this.trusses = [];
+        this.currentTruss = null;
+        this.editingTruss = null;
+        this.spotAssignments = {}; // { spotId: { trussId, position, pan, tilt, targetX, targetY, targetZ } }
+
         this.init();
     }
 
@@ -2931,23 +2937,61 @@ class DMXController {
         if (this.stageDemoMode) {
             this.createDemoSpots();
         } else {
+            // Load trusses if not loaded
+            if (!this.trusses || this.trusses.length === 0) {
+                this.loadTrusses();
+            }
+
             this.stageSpots = this.devices.map((device, index) => {
-                // Calculate position in 3D space (arrange in grid)
-                const gridSize = Math.ceil(Math.sqrt(this.devices.length));
-                const row = Math.floor(index / gridSize);
-                const col = index % gridSize;
-                const spacing = 3;
+                const assignment = this.spotAssignments[device.id];
+
+                let x, y, z, pan = 0, tilt = -45;
+
+                if (assignment) {
+                    // Position based on truss assignment
+                    const truss = this.trusses.find(t => t.id === assignment.trussId);
+                    if (truss) {
+                        // Calculate position along truss
+                        const radians = (truss.rotation * Math.PI) / 180;
+                        x = truss.x + Math.cos(radians) * assignment.position;
+                        z = truss.z + Math.sin(radians) * assignment.position;
+                        y = truss.y;
+                        pan = assignment.pan;
+                        tilt = assignment.tilt;
+                    } else {
+                        // Fallback to grid
+                        const gridSize = Math.ceil(Math.sqrt(this.devices.length));
+                        const row = Math.floor(index / gridSize);
+                        const col = index % gridSize;
+                        const spacing = 3;
+                        x = (col - gridSize / 2) * spacing;
+                        y = 3;
+                        z = (row - gridSize / 2) * spacing;
+                    }
+                } else {
+                    // Default grid position for unassigned spots
+                    const gridSize = Math.ceil(Math.sqrt(this.devices.length));
+                    const row = Math.floor(index / gridSize);
+                    const col = index % gridSize;
+                    const spacing = 3;
+                    x = (col - gridSize / 2) * spacing;
+                    y = 3;
+                    z = (row - gridSize / 2) * spacing;
+                }
 
                 return {
                     id: device.id,
                     name: device.name,
-                    x: (col - gridSize / 2) * spacing,
-                    y: 3, // Height above stage
-                    z: (row - gridSize / 2) * spacing,
+                    x,
+                    y,
+                    z,
+                    pan,
+                    tilt,
                     color: [255, 255, 255],
                     intensity: 0,
                     dmxValues: device.current_values || {},
-                    device: device
+                    device: device,
+                    assignment: assignment
                 };
             });
         }
@@ -4486,6 +4530,425 @@ class DMXController {
                 this.updateStageStats();
             }
         }
+    }
+
+    // ===== Truss Management =====
+    showTrussManager() {
+        this.loadTrusses();
+        this.renderTrussList();
+        document.getElementById('trussManagerModal').classList.add('active');
+    }
+
+    closeTrussManager() {
+        document.getElementById('trussManagerModal').classList.remove('active');
+    }
+
+    loadTrusses() {
+        // Load from localStorage
+        const saved = localStorage.getItem('stageTrusses');
+        if (saved) {
+            this.trusses = JSON.parse(saved);
+        } else {
+            // Create default truss
+            this.trusses = [
+                {
+                    id: 'truss-1',
+                    name: 'Front Traverse',
+                    x: 0,
+                    y: 6,
+                    z: -6,
+                    length: 12,
+                    rotation: 0
+                }
+            ];
+            this.saveTrusses();
+        }
+
+        // Load spot assignments
+        const assignments = localStorage.getItem('spotAssignments');
+        if (assignments) {
+            this.spotAssignments = JSON.parse(assignments);
+        }
+    }
+
+    saveTrusses() {
+        localStorage.setItem('stageTrusses', JSON.stringify(this.trusses));
+        localStorage.setItem('spotAssignments', JSON.stringify(this.spotAssignments));
+    }
+
+    renderTrussList() {
+        const container = document.getElementById('trussList');
+        if (!container) return;
+
+        if (this.trusses.length === 0) {
+            container.innerHTML = '<p style="color: var(--text-secondary);">Keine Traversen vorhanden</p>';
+            return;
+        }
+
+        container.innerHTML = this.trusses.map(truss => {
+            const spotCount = Object.values(this.spotAssignments).filter(a => a.trussId === truss.id).length;
+            const isSelected = this.currentTruss && this.currentTruss.id === truss.id;
+
+            return `
+                <div class="truss-item ${isSelected ? 'selected' : ''}" onclick="app.selectTruss('${truss.id}')">
+                    <div>
+                        <strong>${truss.name}</strong>
+                        <div style="font-size: 0.875rem; color: var(--text-secondary);">
+                            Position: (${truss.x}, ${truss.y}, ${truss.z}) | Länge: ${truss.length}m | ${spotCount} Spots
+                        </div>
+                    </div>
+                    <div style="display: flex; gap: 0.5rem;">
+                        <button class="btn btn-secondary btn-sm" onclick="event.stopPropagation(); app.editTruss('${truss.id}')">
+                            ✏️
+                        </button>
+                        <button class="btn btn-danger btn-sm" onclick="event.stopPropagation(); app.deleteTruss('${truss.id}')">
+                            🗑️
+                        </button>
+                    </div>
+                </div>
+            `;
+        }).join('');
+    }
+
+    selectTruss(trussId) {
+        this.currentTruss = this.trusses.find(t => t.id === trussId);
+        this.renderTrussList();
+        this.renderSpotAssignment();
+    }
+
+    renderSpotAssignment() {
+        const container = document.getElementById('spotAssignmentArea');
+        if (!container || !this.currentTruss) return;
+
+        const assignedSpots = Object.entries(this.spotAssignments)
+            .filter(([_, assignment]) => assignment.trussId === this.currentTruss.id)
+            .map(([spotId, _]) => this.devices.find(d => d.id === spotId))
+            .filter(d => d);
+
+        const availableSpots = this.devices.filter(d =>
+            !this.spotAssignments[d.id] || this.spotAssignments[d.id].trussId !== this.currentTruss.id
+        );
+
+        container.innerHTML = `
+            <h4>${this.currentTruss.name}</h4>
+            <div style="margin-bottom: 1rem;">
+                <label>Spot hinzufügen:</label>
+                <select id="spotToAdd" class="form-control">
+                    <option value="">-- Spot auswählen --</option>
+                    ${availableSpots.map(d => `<option value="${d.id}">${d.name}</option>`).join('')}
+                </select>
+                <button class="btn btn-primary btn-sm" onclick="app.addSpotToTruss()" style="margin-top: 0.5rem;">
+                    Spot hinzufügen
+                </button>
+            </div>
+
+            <h5>Zugeordnete Spots:</h5>
+            <div style="max-height: 300px; overflow-y: auto;">
+                ${assignedSpots.map(spot => {
+                    const assignment = this.spotAssignments[spot.id];
+                    return `
+                        <div class="spot-assignment-item">
+                            <div>
+                                <strong>${spot.name}</strong>
+                                <div style="font-size: 0.875rem; color: var(--text-secondary);">
+                                    Pos: ${assignment.position.toFixed(1)}m |
+                                    Tilt: ${assignment.tilt}° |
+                                    Pan: ${assignment.pan}°
+                                </div>
+                            </div>
+                            <div style="display: flex; gap: 0.5rem;">
+                                <button class="btn btn-secondary btn-sm" onclick="app.configureSpot('${spot.id}')">
+                                    ⚙️ Config
+                                </button>
+                                <button class="btn btn-danger btn-sm" onclick="app.removeSpotFromTruss('${spot.id}')">
+                                    ✖️
+                                </button>
+                            </div>
+                        </div>
+                    `;
+                }).join('') || '<p style="color: var(--text-secondary);">Keine Spots zugeordnet</p>'}
+            </div>
+        `;
+    }
+
+    showAddTruss() {
+        this.editingTruss = null;
+        document.getElementById('trussModalTitle').textContent = 'Traverse hinzufügen';
+        document.getElementById('trussName').value = '';
+        document.getElementById('trussX').value = '0';
+        document.getElementById('trussY').value = '6';
+        document.getElementById('trussZ').value = '-4';
+        document.getElementById('trussLength').value = '10';
+        document.getElementById('trussRotation').value = '0';
+        document.getElementById('addTrussModal').classList.add('active');
+    }
+
+    editTruss(trussId) {
+        this.editingTruss = this.trusses.find(t => t.id === trussId);
+        if (!this.editingTruss) return;
+
+        document.getElementById('trussModalTitle').textContent = 'Traverse bearbeiten';
+        document.getElementById('trussName').value = this.editingTruss.name;
+        document.getElementById('trussX').value = this.editingTruss.x;
+        document.getElementById('trussY').value = this.editingTruss.y;
+        document.getElementById('trussZ').value = this.editingTruss.z;
+        document.getElementById('trussLength').value = this.editingTruss.length;
+        document.getElementById('trussRotation').value = this.editingTruss.rotation;
+        document.getElementById('addTrussModal').classList.add('active');
+    }
+
+    closeAddTruss() {
+        document.getElementById('addTrussModal').classList.remove('active');
+        this.editingTruss = null;
+    }
+
+    saveTruss() {
+        const name = document.getElementById('trussName').value.trim();
+        const x = parseFloat(document.getElementById('trussX').value);
+        const y = parseFloat(document.getElementById('trussY').value);
+        const z = parseFloat(document.getElementById('trussZ').value);
+        const length = parseFloat(document.getElementById('trussLength').value);
+        const rotation = parseFloat(document.getElementById('trussRotation').value);
+
+        if (!name || length <= 0) {
+            this.showToast('Bitte alle Felder ausfüllen', 'error');
+            return;
+        }
+
+        if (this.editingTruss) {
+            // Update existing
+            this.editingTruss.name = name;
+            this.editingTruss.x = x;
+            this.editingTruss.y = y;
+            this.editingTruss.z = z;
+            this.editingTruss.length = length;
+            this.editingTruss.rotation = rotation;
+        } else {
+            // Create new
+            const newTruss = {
+                id: 'truss-' + Date.now(),
+                name,
+                x,
+                y,
+                z,
+                length,
+                rotation
+            };
+            this.trusses.push(newTruss);
+        }
+
+        this.saveTrusses();
+        this.closeAddTruss();
+        this.renderTrussList();
+        this.updateStageWithTrusses();
+        this.showToast('Traverse gespeichert', 'success');
+    }
+
+    deleteTruss(trussId) {
+        if (!confirm('Traverse wirklich löschen? Alle zugeordneten Spots werden entfernt.')) {
+            return;
+        }
+
+        // Remove truss
+        this.trusses = this.trusses.filter(t => t.id !== trussId);
+
+        // Remove spot assignments
+        Object.keys(this.spotAssignments).forEach(spotId => {
+            if (this.spotAssignments[spotId].trussId === trussId) {
+                delete this.spotAssignments[spotId];
+            }
+        });
+
+        this.saveTrusses();
+        this.renderTrussList();
+        this.updateStageWithTrusses();
+        this.showToast('Traverse gelöscht', 'success');
+    }
+
+    addSpotToTruss() {
+        const spotId = document.getElementById('spotToAdd').value;
+        if (!spotId || !this.currentTruss) return;
+
+        this.spotAssignments[spotId] = {
+            trussId: this.currentTruss.id,
+            position: 0, // Center of truss
+            pan: 0,
+            tilt: -45, // Default downward angle
+            targetX: 0,
+            targetY: 0,
+            targetZ: 0
+        };
+
+        this.saveTrusses();
+        this.renderSpotAssignment();
+        this.updateStageWithTrusses();
+        this.showToast('Spot hinzugefügt', 'success');
+    }
+
+    removeSpotFromTruss(spotId) {
+        delete this.spotAssignments[spotId];
+        this.saveTrusses();
+        this.renderSpotAssignment();
+        this.updateStageWithTrusses();
+        this.showToast('Spot entfernt', 'success');
+    }
+
+    configureSpot(spotId) {
+        this.editingSpot = spotId;
+        const assignment = this.spotAssignments[spotId];
+        const spot = this.devices.find(d => d.id === spotId);
+
+        if (!assignment || !spot) return;
+
+        document.getElementById('spotConfigTitle').textContent = `${spot.name} konfigurieren`;
+        document.getElementById('spotTrussPosition').value = assignment.position;
+        document.getElementById('spotTrussPositionValue').textContent = assignment.position.toFixed(1) + ' m';
+        document.getElementById('spotTilt').value = assignment.tilt;
+        document.getElementById('spotTiltValue').textContent = assignment.tilt + '°';
+        document.getElementById('spotPan').value = assignment.pan;
+        document.getElementById('spotPanValue').textContent = assignment.pan + '°';
+        document.getElementById('spotTargetX').value = assignment.targetX;
+        document.getElementById('spotTargetY').value = assignment.targetY;
+        document.getElementById('spotTargetZ').value = assignment.targetZ;
+
+        // Set max/min based on truss length
+        const truss = this.trusses.find(t => t.id === assignment.trussId);
+        if (truss) {
+            const halfLength = truss.length / 2;
+            document.getElementById('spotTrussPosition').min = -halfLength;
+            document.getElementById('spotTrussPosition').max = halfLength;
+        }
+
+        document.getElementById('spotConfigModal').classList.add('active');
+    }
+
+    closeSpotConfig() {
+        document.getElementById('spotConfigModal').classList.remove('active');
+        this.editingSpot = null;
+    }
+
+    updateSpotPositionPreview() {
+        const value = document.getElementById('spotTrussPosition').value;
+        document.getElementById('spotTrussPositionValue').textContent = parseFloat(value).toFixed(1) + ' m';
+    }
+
+    updateSpotTiltPreview() {
+        const value = document.getElementById('spotTilt').value;
+        document.getElementById('spotTiltValue').textContent = value + '°';
+    }
+
+    updateSpotPanPreview() {
+        const value = document.getElementById('spotPan').value;
+        document.getElementById('spotPanValue').textContent = value + '°';
+    }
+
+    autoAimSpot() {
+        if (!this.editingSpot) return;
+
+        const assignment = this.spotAssignments[this.editingSpot];
+        const truss = this.trusses.find(t => t.id === assignment.trussId);
+        if (!truss) return;
+
+        // Calculate spot world position
+        const radians = (truss.rotation * Math.PI) / 180;
+        const spotWorldX = truss.x + Math.cos(radians) * assignment.position;
+        const spotWorldZ = truss.z + Math.sin(radians) * assignment.position;
+        const spotWorldY = truss.y;
+
+        // Get target position
+        const targetX = parseFloat(document.getElementById('spotTargetX').value) || 0;
+        const targetY = parseFloat(document.getElementById('spotTargetY').value) || 0;
+        const targetZ = parseFloat(document.getElementById('spotTargetZ').value) || 0;
+
+        // Calculate direction vector
+        const dx = targetX - spotWorldX;
+        const dy = targetY - spotWorldY;
+        const dz = targetZ - spotWorldZ;
+
+        // Calculate pan (rotation around Y axis)
+        const pan = Math.atan2(dx, dz) * (180 / Math.PI);
+
+        // Calculate tilt (rotation around X axis)
+        const distXZ = Math.sqrt(dx * dx + dz * dz);
+        const tilt = -Math.atan2(dy, distXZ) * (180 / Math.PI);
+
+        // Update UI
+        document.getElementById('spotPan').value = Math.round(pan);
+        document.getElementById('spotTilt').value = Math.round(tilt);
+        this.updateSpotPanPreview();
+        this.updateSpotTiltPreview();
+
+        this.showToast('Spot automatisch ausgerichtet', 'success');
+    }
+
+    saveSpotConfig() {
+        if (!this.editingSpot) return;
+
+        const assignment = this.spotAssignments[this.editingSpot];
+        assignment.position = parseFloat(document.getElementById('spotTrussPosition').value);
+        assignment.tilt = parseInt(document.getElementById('spotTilt').value);
+        assignment.pan = parseInt(document.getElementById('spotPan').value);
+        assignment.targetX = parseFloat(document.getElementById('spotTargetX').value) || 0;
+        assignment.targetY = parseFloat(document.getElementById('spotTargetY').value) || 0;
+        assignment.targetZ = parseFloat(document.getElementById('spotTargetZ').value) || 0;
+
+        this.saveTrusses();
+        this.closeSpotConfig();
+        this.renderSpotAssignment();
+        this.updateStageWithTrusses();
+        this.showToast('Spot-Konfiguration gespeichert', 'success');
+    }
+
+    updateStageWithTrusses() {
+        // Update stage spots based on truss assignments
+        this.updateStageSpots();
+
+        // Update 3D if initialized
+        if (this.threeInitialized) {
+            this.rebuild3DScene();
+        }
+    }
+
+    rebuild3DScene() {
+        if (!this.threeScene) return;
+
+        // Remove old trusses and spots
+        if (this.threeTrussMeshes) {
+            this.threeTrussMeshes.forEach(mesh => this.threeScene.remove(mesh));
+        }
+        this.threeTrussMeshes = [];
+
+        // Create new trusses and spots
+        this.create3DTrusses();
+        this.update3DSpots();
+    }
+
+    create3DTrusses() {
+        if (!this.threeScene) return;
+
+        this.threeTrussMeshes = [];
+
+        this.trusses.forEach(truss => {
+            // Truss structure
+            const trussGeometry = new THREE.CylinderGeometry(0.15, 0.15, truss.length, 8);
+            const trussMaterial = new THREE.MeshStandardMaterial({
+                color: 0x555555,
+                metalness: 0.8,
+                roughness: 0.2
+            });
+            const trussMesh = new THREE.Mesh(trussGeometry, trussMaterial);
+
+            // Position and rotate
+            trussMesh.position.set(truss.x, truss.y, truss.z);
+            trussMesh.rotation.y = (truss.rotation * Math.PI) / 180;
+            trussMesh.rotation.z = Math.PI / 2; // Horizontal
+
+            trussMesh.castShadow = true;
+            trussMesh.receiveShadow = true;
+
+            this.threeScene.add(trussMesh);
+            this.threeTrussMeshes.push(trussMesh);
+        });
     }
 }
 
