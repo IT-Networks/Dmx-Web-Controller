@@ -1584,6 +1584,7 @@ class DMXController {
                 { time: 0, values: { default: [255, 255, 255] }, easing: 'linear' },
                 { time: 100, values: { default: [255, 0, 0] }, easing: 'linear' }
             ];
+            this.updateKeyframeList();
             this.drawTimeline();
         }, 50);
     }
@@ -1691,7 +1692,8 @@ class DMXController {
             // Update keyframe time
             this.designerKeyframes[draggedKeyframeIndex].time = newTime;
 
-            // Redraw
+            // Update list and redraw
+            this.updateKeyframeList();
             this.drawTimeline();
             e.preventDefault();
         };
@@ -1701,6 +1703,7 @@ class DMXController {
             if (isDragging) {
                 isDragging = false;
                 draggedKeyframeIndex = -1;
+                this.updateKeyframeList();
                 e.preventDefault();
             }
         };
@@ -1779,14 +1782,31 @@ class DMXController {
             const x = (kf.time / 100) * width;
             const y = height / 2;
 
-            ctx.fillStyle = index === this.currentKeyframeIndex ? '#3b82f6' : '#f59e0b';
+            const isSelected = index === this.currentKeyframeIndex;
+
+            // Draw glow for selected keyframe
+            if (isSelected) {
+                ctx.fillStyle = 'rgba(59, 130, 246, 0.3)';
+                ctx.beginPath();
+                ctx.arc(x, y, 14, 0, Math.PI * 2);
+                ctx.fill();
+            }
+
+            // Draw keyframe marker
+            ctx.fillStyle = isSelected ? '#3b82f6' : '#f59e0b';
             ctx.beginPath();
-            ctx.arc(x, y, 6, 0, Math.PI * 2);
+            ctx.arc(x, y, isSelected ? 8 : 6, 0, Math.PI * 2);
             ctx.fill();
 
-            ctx.strokeStyle = '#0f172a';
-            ctx.lineWidth = 2;
+            ctx.strokeStyle = isSelected ? '#ffffff' : '#0f172a';
+            ctx.lineWidth = isSelected ? 3 : 2;
             ctx.stroke();
+
+            // Draw keyframe number above
+            ctx.fillStyle = isSelected ? '#3b82f6' : '#94a3b8';
+            ctx.font = isSelected ? 'bold 11px sans-serif' : '10px sans-serif';
+            ctx.textAlign = 'center';
+            ctx.fillText(`${index + 1}`, x, y - 15);
         });
     }
 
@@ -1814,14 +1834,74 @@ class DMXController {
         }
 
         this.designerKeyframes.push(newKeyframe);
+        this.updateKeyframeList();
         this.drawTimeline();
         this.selectKeyframe(this.designerKeyframes.length - 1);
         this.showToast('Keyframe hinzugefügt', 'success');
     }
 
+    updateKeyframeList() {
+        const container = document.getElementById('keyframeListItems');
+        if (!container) return;
+
+        container.innerHTML = '';
+
+        this.designerKeyframes.forEach((kf, index) => {
+            const item = document.createElement('div');
+            item.className = 'keyframe-list-item' + (index === this.currentKeyframeIndex ? ' active' : '');
+
+            // Marker indicator
+            const marker = document.createElement('div');
+            marker.className = 'keyframe-marker-indicator';
+            item.appendChild(marker);
+
+            // Info
+            const info = document.createElement('div');
+            info.className = 'keyframe-info';
+
+            const time = document.createElement('div');
+            time.className = 'keyframe-time';
+            time.textContent = `Keyframe ${index + 1}`;
+            info.appendChild(time);
+
+            const details = document.createElement('div');
+            details.className = 'keyframe-details';
+            details.textContent = `Position: ${kf.time.toFixed(1)}%`;
+            info.appendChild(details);
+
+            item.appendChild(info);
+
+            // Color preview (if available)
+            if (this.designerMode === 'spot' && kf.values && kf.values.default) {
+                const colorPreview = document.createElement('div');
+                colorPreview.className = 'keyframe-color-preview';
+                const rgb = kf.values.default;
+                colorPreview.style.background = `rgb(${rgb[0]}, ${rgb[1]}, ${rgb[2]})`;
+                item.appendChild(colorPreview);
+            } else if (kf.pattern && kf.pattern.color) {
+                const colorPreview = document.createElement('div');
+                colorPreview.className = 'keyframe-color-preview';
+                const rgb = kf.pattern.color;
+                colorPreview.style.background = `rgb(${rgb[0]}, ${rgb[1]}, ${rgb[2]})`;
+                item.appendChild(colorPreview);
+            }
+
+            // Click to select
+            item.onclick = () => this.selectKeyframe(index);
+
+            container.appendChild(item);
+        });
+    }
+
     selectKeyframe(index) {
         this.currentKeyframeIndex = index;
         const kf = this.designerKeyframes[index];
+
+        // Update list highlighting
+        this.updateKeyframeList();
+
+        // Redraw timeline to highlight selected keyframe
+        this.drawTimeline();
 
         // Show keyframe editor
         document.getElementById('keyframeEditor').style.display = 'block';
@@ -2019,6 +2099,7 @@ class DMXController {
             }
         }
 
+        this.updateKeyframeList();
         this.drawTimeline();
         this.showToast('Keyframe aktualisiert', 'success');
     }
@@ -2032,9 +2113,17 @@ class DMXController {
         }
 
         this.designerKeyframes.splice(this.currentKeyframeIndex, 1);
-        this.currentKeyframeIndex = -1;
-        document.getElementById('keyframeEditor').style.display = 'none';
+        this.currentKeyframeIndex = Math.max(0, this.currentKeyframeIndex - 1);
+
+        this.updateKeyframeList();
         this.drawTimeline();
+
+        if (this.designerKeyframes.length > 0) {
+            this.selectKeyframe(this.currentKeyframeIndex);
+        } else {
+            document.getElementById('keyframeEditor').style.display = 'none';
+        }
+
         this.showToast('Keyframe gelöscht', 'success');
     }
 

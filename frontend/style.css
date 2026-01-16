@@ -1647,6 +1647,101 @@ canvas {
 
 /* Timeline canvas sizing handled by JavaScript */
 
+/* Keyframe List */
+.keyframe-list {
+    margin-top: 1rem;
+    padding: 1rem;
+    background: var(--bg-primary);
+    border-radius: var(--radius-md);
+    border: 1px solid var(--border-color);
+}
+
+.keyframe-list h4 {
+    font-size: 0.875rem;
+    font-weight: 600;
+    color: var(--text-secondary);
+    margin-bottom: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.keyframe-list-items {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    max-height: 200px;
+    overflow-y: auto;
+}
+
+.keyframe-list-item {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 0.75rem;
+    background: var(--bg-secondary);
+    border: 2px solid transparent;
+    border-radius: var(--radius-md);
+    cursor: pointer;
+    transition: var(--transition);
+}
+
+.keyframe-list-item:hover {
+    background: var(--bg-tertiary);
+    border-color: var(--border-color);
+}
+
+.keyframe-list-item.active {
+    background: var(--bg-tertiary);
+    border-color: var(--accent-primary);
+    box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.2);
+}
+
+.keyframe-marker-indicator {
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    background: var(--warning);
+    border: 2px solid var(--bg-primary);
+    flex-shrink: 0;
+}
+
+.keyframe-list-item.active .keyframe-marker-indicator {
+    background: var(--accent-primary);
+    box-shadow: 0 0 8px var(--accent-primary);
+    animation: pulse-indicator 1.5s ease-in-out infinite;
+}
+
+@keyframes pulse-indicator {
+    0%, 100% { transform: scale(1); opacity: 1; }
+    50% { transform: scale(1.2); opacity: 0.8; }
+}
+
+.keyframe-info {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+}
+
+.keyframe-time {
+    font-size: 0.875rem;
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+.keyframe-details {
+    font-size: 0.75rem;
+    color: var(--text-muted);
+}
+
+.keyframe-color-preview {
+    width: 32px;
+    height: 32px;
+    border-radius: var(--radius-sm);
+    border: 2px solid var(--border-color);
+    flex-shrink: 0;
+}
+
 /* Touch-friendly Keyframe Markers on Touch Devices */
 @media (hover: none) and (pointer: coarse) {
     .keyframe-marker {
