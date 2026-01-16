@@ -1594,6 +1594,9 @@ class DMXController {
         if (this.previewPlaying) {
             this.stopPreview();
         }
+        if (this.effectPreviewPlaying) {
+            this.stopEffectPreview();
+        }
         document.getElementById('visualDesignerModal').classList.remove('active');
         this.designerKeyframes = [];
         this.currentKeyframeIndex = -1;
