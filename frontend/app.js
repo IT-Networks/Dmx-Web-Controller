@@ -3001,33 +3001,53 @@ class DMXController {
     }
 
     createDemoSpots() {
-        // Create a variety of demo spots with different positions and types
-        this.stageSpots = [
-            // Front row - PAR spots
-            { id: 'demo-1', name: 'PAR Front L', x: -6, y: 2.5, z: -8, color: [255, 0, 0], intensity: 80, type: 'par' },
-            { id: 'demo-2', name: 'PAR Front C', x: 0, y: 2.5, z: -8, color: [0, 255, 0], intensity: 90, type: 'par' },
-            { id: 'demo-3', name: 'PAR Front R', x: 6, y: 2.5, z: -8, color: [0, 0, 255], intensity: 85, type: 'par' },
+        // Create demo truss if not exists
+        const demoTrussId = 'demo-truss-1';
+        if (!this.trusses.find(t => t.id === demoTrussId)) {
+            this.trusses.push({
+                id: demoTrussId,
+                name: 'Demo Traverse',
+                x: 0,
+                y: 4,
+                z: -4,
+                length: 12,
+                rotation: 90,
+                isDemo: true
+            });
+        }
 
-            // Mid row - Moving Heads
-            { id: 'demo-4', name: 'Moving Head L', x: -4, y: 3.5, z: -4, color: [255, 255, 0], intensity: 70, type: 'moving' },
-            { id: 'demo-5', name: 'Moving Head C', x: 0, y: 3.5, z: -4, color: [255, 0, 255], intensity: 95, type: 'moving' },
-            { id: 'demo-6', name: 'Moving Head R', x: 4, y: 3.5, z: -4, color: [0, 255, 255], intensity: 75, type: 'moving' },
+        // Create spot assignments for demo devices
+        const demoTruss = this.trusses.find(t => t.id === demoTrussId);
+        const demoDeviceCount = 15;
+        const spacing = demoTruss.length / (demoDeviceCount + 1);
 
-            // Back row - Wash lights
-            { id: 'demo-7', name: 'Wash Back L', x: -6, y: 4, z: 0, color: [255, 128, 0], intensity: 60, type: 'wash' },
-            { id: 'demo-8', name: 'Wash Back C', x: 0, y: 4, z: 0, color: [128, 255, 128], intensity: 65, type: 'wash' },
-            { id: 'demo-9', name: 'Wash Back R', x: 6, y: 4, z: 0, color: [128, 128, 255], intensity: 70, type: 'wash' },
+        // Build stageSpots from demo truss
+        this.stageSpots = [];
+        for (let i = 0; i < demoDeviceCount; i++) {
+            const position = -demoTruss.length / 2 + spacing * (i + 1);
+            const radians = (demoTruss.rotation * Math.PI) / 180;
+            const x = demoTruss.x + Math.cos(radians) * position;
+            const z = demoTruss.z + Math.sin(radians) * position;
 
-            // Side spots
-            { id: 'demo-10', name: 'Side Spot L', x: -8, y: 3, z: -4, color: [255, 200, 100], intensity: 50, type: 'spot' },
-            { id: 'demo-11', name: 'Side Spot R', x: 8, y: 3, z: -4, color: [100, 200, 255], intensity: 55, type: 'spot' },
+            // Vary pan and tilt for visual interest
+            const pan = (i % 3 - 1) * 15; // -15, 0, 15 degrees
+            const tilt = -45 - (i % 2) * 10; // -45 or -55 degrees
 
-            // Top truss
-            { id: 'demo-12', name: 'Truss Front L', x: -3, y: 5, z: -6, color: [255, 100, 200], intensity: 40, type: 'truss' },
-            { id: 'demo-13', name: 'Truss Front R', x: 3, y: 5, z: -6, color: [200, 100, 255], intensity: 45, type: 'truss' },
-            { id: 'demo-14', name: 'Truss Back L', x: -3, y: 5, z: -2, color: [100, 255, 200], intensity: 35, type: 'truss' },
-            { id: 'demo-15', name: 'Truss Back R', x: 3, y: 5, z: -2, color: [200, 255, 100], intensity: 38, type: 'truss' },
-        ];
+            this.stageSpots.push({
+                id: `demo-${i + 1}`,
+                name: `Demo Spot ${i + 1}`,
+                x: x,
+                y: demoTruss.y,
+                z: z,
+                pan: pan,
+                tilt: tilt,
+                color: [255, 255, 255],
+                intensity: 70,
+                type: 'demo',
+                trussId: demoTrussId,
+                position: position
+            });
+        }
     }
 
     updateDemoSpots() {
@@ -3335,6 +3355,54 @@ class DMXController {
             }
         }
 
+        // Draw trusses
+        this.trusses.forEach(truss => {
+            const trussX2d = centerX + truss.x * scale;
+            const trussZ2d = centerY + truss.z * scale;
+
+            const radians = (truss.rotation * Math.PI) / 180;
+            const halfLength = (truss.length / 2) * scale;
+
+            // Calculate truss endpoints
+            const startX = trussX2d - Math.cos(radians) * halfLength;
+            const startY = trussZ2d - Math.sin(radians) * halfLength;
+            const endX = trussX2d + Math.cos(radians) * halfLength;
+            const endY = trussZ2d + Math.sin(radians) * halfLength;
+
+            // Draw truss line
+            ctx.strokeStyle = '#94a3b8';
+            ctx.lineWidth = 8;
+            ctx.lineCap = 'round';
+            ctx.beginPath();
+            ctx.moveTo(startX, startY);
+            ctx.lineTo(endX, endY);
+            ctx.stroke();
+
+            // Draw truss endpoints (handles)
+            ctx.fillStyle = '#64748b';
+            ctx.beginPath();
+            ctx.arc(startX, startY, 6, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.beginPath();
+            ctx.arc(endX, endY, 6, 0, Math.PI * 2);
+            ctx.fill();
+
+            // Draw truss center point
+            ctx.fillStyle = '#475569';
+            ctx.beginPath();
+            ctx.arc(trussX2d, trussZ2d, 4, 0, Math.PI * 2);
+            ctx.fill();
+
+            // Draw truss label
+            if (this.showLabels) {
+                ctx.fillStyle = '#f1f5f9';
+                ctx.font = '12px monospace';
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'bottom';
+                ctx.fillText(truss.name, trussX2d, trussZ2d - 10);
+            }
+        });
+
         // Draw spots
         this.stageSpots.forEach(spot => {
             const x2d = centerX + spot.x * scale;
@@ -3467,86 +3535,198 @@ class DMXController {
 
         let isDragging = false;
         let isDraggingSpot = false;
+        let isDraggingTruss = false;
+        let isDraggingTrussEnd = false;
         let draggedSpot = null;
+        let draggedTruss = null;
         let lastX = 0;
         let lastY = 0;
 
-        canvas.addEventListener('mousedown', (e) => {
+        const handleStart = (clientX, clientY) => {
             const rect = canvas.getBoundingClientRect();
-            const x = e.clientX - rect.left;
-            const y = e.clientY - rect.top;
+            const x = clientX - rect.left;
+            const y = clientY - rect.top;
 
-            // Check if clicking on a spot
-            const spot = this.getSpotAtPosition(x, y);
-
-            if (spot && (this.stageView === 'top' || this.stageView === 'front')) {
-                isDraggingSpot = true;
-                draggedSpot = spot;
-                canvas.style.cursor = 'grabbing';
-            } else {
-                isDragging = true;
+            // Check if clicking on a truss end (for length adjustment)
+            const trussEnd = this.getTrussEndAtPosition(x, y);
+            if (trussEnd && this.stageView === 'top') {
+                isDraggingTrussEnd = true;
+                draggedTruss = trussEnd.truss;
+                canvas.style.cursor = 'ew-resize';
+            }
+            // Check if clicking on a truss (for position)
+            else if (!trussEnd) {
+                const truss = this.getTrussAtPosition(x, y);
+                if (truss && this.stageView === 'top') {
+                    isDraggingTruss = true;
+                    draggedTruss = truss;
+                    canvas.style.cursor = 'grabbing';
+                }
+                // Check if clicking on a spot
+                else {
+                    const spot = this.getSpotAtPosition(x, y);
+                    if (spot && (this.stageView === 'top' || this.stageView === 'front')) {
+                        isDraggingSpot = true;
+                        draggedSpot = spot;
+                        canvas.style.cursor = 'grabbing';
+                    } else {
+                        isDragging = true;
+                    }
+                }
             }
 
-            lastX = e.clientX;
-            lastY = e.clientY;
-        });
+            lastX = clientX;
+            lastY = clientY;
+        };
 
-        canvas.addEventListener('mousemove', (e) => {
+        const handleMove = (clientX, clientY) => {
             const rect = canvas.getBoundingClientRect();
-            const x = e.clientX - rect.left;
-            const y = e.clientY - rect.top;
+            const x = clientX - rect.left;
+            const y = clientY - rect.top;
 
-            if (isDraggingSpot && draggedSpot) {
-                // Move spot based on view
-                const deltaX = (e.clientX - lastX) / 30; // Scale factor
-                const deltaY = (e.clientY - lastY) / 30;
+            if (isDraggingTruss && draggedTruss) {
+                // Move truss
+                const deltaX = (clientX - lastX) / 30;
+                const deltaY = (clientY - lastY) / 30;
 
                 if (this.stageView === 'top') {
-                    draggedSpot.x += deltaX;
-                    draggedSpot.z += deltaY;
-                } else if (this.stageView === 'front') {
-                    draggedSpot.x += deltaX;
-                    draggedSpot.y -= deltaY;
+                    draggedTruss.x += deltaX;
+                    draggedTruss.z += deltaY;
+
+                    // Update all spots on this truss
+                    this.updateStageSpots();
+                    if (this.threeInitialized && this.stageView === '3d') {
+                        this.rebuild3DScene();
+                    }
                 }
 
-                lastX = e.clientX;
-                lastY = e.clientY;
+                lastX = clientX;
+                lastY = clientY;
+            } else if (isDraggingTrussEnd && draggedTruss) {
+                // Adjust truss length
+                const deltaX = (clientX - lastX) / 30;
+
+                draggedTruss.length = Math.max(2, draggedTruss.length + deltaX);
+
+                // Update spots
+                this.updateStageSpots();
+                if (this.threeInitialized && this.stageView === '3d') {
+                    this.rebuild3DScene();
+                }
+
+                lastX = clientX;
+                lastY = clientY;
+            } else if (isDraggingSpot && draggedSpot) {
+                // Move spot along truss only
+                if (draggedSpot.trussId || (draggedSpot.assignment && draggedSpot.assignment.trussId)) {
+                    const trussId = draggedSpot.trussId || draggedSpot.assignment.trussId;
+                    const truss = this.trusses.find(t => t.id === trussId);
+
+                    if (truss) {
+                        const deltaX = (clientX - lastX) / 30;
+                        const deltaY = (clientY - lastY) / 30;
+
+                        // Project movement onto truss direction
+                        const radians = (truss.rotation * Math.PI) / 180;
+                        const trussDir = { x: Math.cos(radians), z: Math.sin(radians) };
+                        const movement = deltaX * trussDir.x + deltaY * trussDir.z;
+
+                        // Update position along truss
+                        const currentPos = draggedSpot.position || 0;
+                        const newPos = Math.max(-truss.length / 2, Math.min(truss.length / 2, currentPos + movement));
+
+                        // Update assignment or spot directly
+                        if (this.stageDemoMode) {
+                            draggedSpot.position = newPos;
+                            draggedSpot.x = truss.x + Math.cos(radians) * newPos;
+                            draggedSpot.z = truss.z + Math.sin(radians) * newPos;
+                        } else {
+                            const assignment = this.spotAssignments[draggedSpot.id];
+                            if (assignment) {
+                                assignment.position = newPos;
+                                this.updateStageSpots();
+                            }
+                        }
+                    }
+                }
+
+                lastX = clientX;
+                lastY = clientY;
             } else if (isDragging && this.stageView === 'perspective') {
-                const deltaX = e.clientX - lastX;
-                const deltaY = e.clientY - lastY;
+                const deltaX = clientX - lastX;
+                const deltaY = clientY - lastY;
 
                 this.stageCamera.rotY += deltaX * 0.5;
                 this.stageCamera.rotX += deltaY * 0.5;
 
-                lastX = e.clientX;
-                lastY = e.clientY;
+                lastX = clientX;
+                lastY = clientY;
             } else {
-                // Update cursor if hovering over spot
-                const spot = this.getSpotAtPosition(x, y);
-                if (spot && (this.stageView === 'top' || this.stageView === 'front')) {
-                    canvas.style.cursor = 'grab';
+                // Update cursor based on what's under mouse
+                const trussEnd = this.getTrussEndAtPosition(x, y);
+                if (trussEnd && this.stageView === 'top') {
+                    canvas.style.cursor = 'ew-resize';
                 } else {
-                    canvas.style.cursor = 'default';
+                    const truss = this.getTrussAtPosition(x, y);
+                    if (truss && this.stageView === 'top') {
+                        canvas.style.cursor = 'move';
+                    } else {
+                        const spot = this.getSpotAtPosition(x, y);
+                        if (spot && (this.stageView === 'top' || this.stageView === 'front')) {
+                            canvas.style.cursor = 'grab';
+                        } else {
+                            canvas.style.cursor = 'default';
+                        }
+                    }
                 }
             }
 
             // Show spot details on hover
-            this.handleStageHover(e);
-        });
+            this.handleStageHover(clientX, clientY);
+        };
 
-        canvas.addEventListener('mouseup', () => {
+        const handleEnd = () => {
+            if (isDraggingTruss || isDraggingTrussEnd) {
+                // Save truss changes
+                this.saveTrusses();
+            }
+
             isDragging = false;
             isDraggingSpot = false;
+            isDraggingTruss = false;
+            isDraggingTrussEnd = false;
             draggedSpot = null;
+            draggedTruss = null;
             canvas.style.cursor = 'default';
-        });
+        };
 
+        // Mouse events
+        canvas.addEventListener('mousedown', (e) => handleStart(e.clientX, e.clientY));
+        canvas.addEventListener('mousemove', (e) => handleMove(e.clientX, e.clientY));
+        canvas.addEventListener('mouseup', handleEnd);
         canvas.addEventListener('mouseleave', () => {
-            isDragging = false;
-            isDraggingSpot = false;
-            draggedSpot = null;
-            canvas.style.cursor = 'default';
+            handleEnd();
             this.hideSpotDetails();
+        });
+
+        // Touch events
+        canvas.addEventListener('touchstart', (e) => {
+            e.preventDefault();
+            if (e.touches.length === 1) {
+                handleStart(e.touches[0].clientX, e.touches[0].clientY);
+            }
+        });
+
+        canvas.addEventListener('touchmove', (e) => {
+            e.preventDefault();
+            if (e.touches.length === 1) {
+                handleMove(e.touches[0].clientX, e.touches[0].clientY);
+            }
+        });
+
+        canvas.addEventListener('touchend', (e) => {
+            e.preventDefault();
+            handleEnd();
         });
 
         // Zoom with mouse wheel
@@ -3597,11 +3777,95 @@ class DMXController {
         return null;
     }
 
-    handleStageHover(e) {
+    getTrussAtPosition(x, y) {
+        if (this.stageView !== 'top') return null;
+
+        const canvas = document.getElementById('stageCanvas');
+        const width = canvas.width;
+        const height = canvas.height;
+        const scale = 30;
+        const centerX = width / 2;
+        const centerY = height / 2;
+
+        for (const truss of this.trusses) {
+            const trussX2d = centerX + truss.x * scale;
+            const trussZ2d = centerY + truss.z * scale;
+
+            const radians = (truss.rotation * Math.PI) / 180;
+            const halfLength = (truss.length / 2) * scale;
+
+            // Calculate truss endpoints
+            const startX = trussX2d - Math.cos(radians) * halfLength;
+            const startY = trussZ2d - Math.sin(radians) * halfLength;
+            const endX = trussX2d + Math.cos(radians) * halfLength;
+            const endY = trussZ2d + Math.sin(radians) * halfLength;
+
+            // Distance from point to line segment
+            const dist = this.pointToLineDistance(x, y, startX, startY, endX, endY);
+
+            if (dist < 10) {
+                return truss;
+            }
+        }
+
+        return null;
+    }
+
+    getTrussEndAtPosition(x, y) {
+        if (this.stageView !== 'top') return null;
+
+        const canvas = document.getElementById('stageCanvas');
+        const width = canvas.width;
+        const height = canvas.height;
+        const scale = 30;
+        const centerX = width / 2;
+        const centerY = height / 2;
+
+        for (const truss of this.trusses) {
+            const trussX2d = centerX + truss.x * scale;
+            const trussZ2d = centerY + truss.z * scale;
+
+            const radians = (truss.rotation * Math.PI) / 180;
+            const halfLength = (truss.length / 2) * scale;
+
+            // Calculate truss endpoints
+            const endX = trussX2d + Math.cos(radians) * halfLength;
+            const endY = trussZ2d + Math.sin(radians) * halfLength;
+
+            // Check if near end point
+            const dist = Math.sqrt((x - endX) ** 2 + (y - endY) ** 2);
+
+            if (dist < 15) {
+                return { truss, end: 'right' };
+            }
+        }
+
+        return null;
+    }
+
+    pointToLineDistance(px, py, x1, y1, x2, y2) {
+        const dx = x2 - x1;
+        const dy = y2 - y1;
+        const lengthSquared = dx * dx + dy * dy;
+
+        if (lengthSquared === 0) {
+            return Math.sqrt((px - x1) ** 2 + (py - y1) ** 2);
+        }
+
+        let t = ((px - x1) * dx + (py - y1) * dy) / lengthSquared;
+        t = Math.max(0, Math.min(1, t));
+
+        const closestX = x1 + t * dx;
+        const closestY = y1 + t * dy;
+
+        return Math.sqrt((px - closestX) ** 2 + (py - closestY) ** 2);
+    }
+
+    handleStageHover(clientX, clientY) {
         const canvas = document.getElementById('stageCanvas');
         const rect = canvas.getBoundingClientRect();
-        const x = e.clientX - rect.left;
-        const y = e.clientY - rect.top;
+        const x = clientX - rect.left;
+        const y = clientY - rect.top;
 
         // Check if hovering over a spot (simplified check for top view)
         if (this.stageView === 'top') {
@@ -3617,7 +3881,7 @@ class DMXController {
                 const distance = Math.sqrt((x - x2d) ** 2 + (y - y2d) ** 2);
 
                 if (distance < 20) {
-                    this.showSpotDetails(spot, e.clientX, e.clientY);
+                    this.showSpotDetails(spot, clientX, clientY);
                     return;
                 }
             }
@@ -3639,10 +3903,14 @@ class DMXController {
 
         document.getElementById('spotDetailIntensity').textContent = `${Math.round(spot.intensity)}%`;
 
-        const device = spot.device;
-        const startCh = device.start_channel || 1;
-        const chCount = device.channels ? device.channels.length : 0;
-        document.getElementById('spotDetailDMX').textContent = `Ch ${startCh}-${startCh + chCount - 1}`;
+        if (spot.device) {
+            const device = spot.device;
+            const startCh = device.start_channel || 1;
+            const chCount = device.channels ? device.channels.length : 0;
+            document.getElementById('spotDetailDMX').textContent = `Ch ${startCh}-${startCh + chCount - 1}`;
+        } else {
+            document.getElementById('spotDetailDMX').textContent = 'Demo';
+        }
 
         popup.style.display = 'block';
         popup.style.left = (x + 15) + 'px';
@@ -3692,6 +3960,17 @@ class DMXController {
         } else {
             // Remove demo devices from device list
             this.removeDemoDevices();
+
+            // Remove demo trusses
+            this.trusses = this.trusses.filter(t => !t.isDemo);
+            this.saveTrusses();
+
+            // Clear demo spot assignments
+            Object.keys(this.spotAssignments).forEach(spotId => {
+                if (spotId.startsWith('demo-')) {
+                    delete this.spotAssignments[spotId];
+                }
+            });
         }
 
         // Update button states
@@ -3700,9 +3979,9 @@ class DMXController {
         // Regenerate spots for both 2D and 3D
         this.updateStageSpots();
 
-        // Update 3D spots if in 3D view
+        // Update 3D spots and trusses if in 3D view
         if (this.threeInitialized && this.stageView === '3d') {
-            this.update3DSpots();
+            this.rebuild3DScene();
         }
     }
 
