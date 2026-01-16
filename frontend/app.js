@@ -3653,8 +3653,13 @@ class DMXController {
         // Update button states
         this.updateStageDemoButtons();
 
-        // Regenerate spots
+        // Regenerate spots for both 2D and 3D
         this.updateStageSpots();
+
+        // Update 3D spots if in 3D view
+        if (this.threeInitialized && this.stageView === '3d') {
+            this.update3DSpots();
+        }
     }
 
     updateStageDemoButtons() {
@@ -3675,6 +3680,25 @@ class DMXController {
     restoreStageDemoState() {
         // Restore demo mode button states after tab switch
         this.updateStageDemoButtons();
+
+        // If demo mode is active, make sure demo devices are loaded
+        if (this.stageDemoMode) {
+            // Check if demo devices are already in the list
+            const hasDemo = this.devices.some(d => d.id && d.id.startsWith('demo-'));
+
+            if (!hasDemo) {
+                // Re-add demo devices if they were removed
+                this.addDemoDevices();
+            }
+
+            // Update stage spots to reflect demo mode
+            this.updateStageSpots();
+
+            // Update 3D spots if in 3D view
+            if (this.threeInitialized && this.stageView === '3d') {
+                this.update3DSpots();
+            }
+        }
     }
 
     addDemoDevices() {
@@ -4093,37 +4117,47 @@ class DMXController {
 
     // ===== Three.js 3D View =====
     initThreeJS() {
-        if (this.threeInitialized || typeof THREE === 'undefined') return;
+        if (this.threeInitialized || typeof THREE === 'undefined') {
+            console.log('Three.js already initialized or not loaded');
+            return;
+        }
 
         const container = document.getElementById('stage3DContainer');
-        if (!container) return;
+        if (!container) {
+            console.error('3D container not found');
+            return;
+        }
+
+        console.log('Initializing Three.js, container size:', container.clientWidth, 'x', container.clientHeight);
 
         // Scene setup
         this.threeScene = new THREE.Scene();
         this.threeScene.background = new THREE.Color(0x0a0e1a);
+        this.threeScene.fog = new THREE.Fog(0x0a0e1a, 20, 60);
 
-        // Camera setup
+        // Camera setup - look at stage center
         this.threeCamera = new THREE.PerspectiveCamera(
             75,
             container.clientWidth / container.clientHeight,
             0.1,
             1000
         );
-        this.threeCamera.position.set(15, 12, 15);
-        this.threeCamera.lookAt(0, 0, 0);
+        this.threeCamera.position.set(15, 10, 10);
+        this.threeCamera.lookAt(0, 3, -4); // Look at stage center
 
         // Renderer setup
         this.threeRenderer = new THREE.WebGLRenderer({ antialias: true });
         this.threeRenderer.setSize(container.clientWidth, container.clientHeight);
+        this.threeRenderer.setPixelRatio(window.devicePixelRatio);
         this.threeRenderer.shadowMap.enabled = true;
         this.threeRenderer.shadowMap.type = THREE.PCFSoftShadowMap;
         container.appendChild(this.threeRenderer.domElement);
 
-        // Lighting
-        const ambientLight = new THREE.AmbientLight(0x404040, 0.5);
+        // Lighting - brighter for better visibility
+        const ambientLight = new THREE.AmbientLight(0x606060, 1.0);
         this.threeScene.add(ambientLight);
 
-        const mainLight = new THREE.DirectionalLight(0xffffff, 0.8);
+        const mainLight = new THREE.DirectionalLight(0xffffff, 1.2);
         mainLight.position.set(10, 20, 10);
         mainLight.castShadow = true;
         mainLight.shadow.mapSize.width = 2048;
@@ -4136,17 +4170,30 @@ class DMXController {
         mainLight.shadow.camera.bottom = -30;
         this.threeScene.add(mainLight);
 
+        // Add helper light from other side
+        const fillLight = new THREE.DirectionalLight(0x8080ff, 0.4);
+        fillLight.position.set(-10, 15, -10);
+        this.threeScene.add(fillLight);
+
         // Add stage platform
         this.createStagePlatform();
 
-        // Add grid helper
-        const gridHelper = new THREE.GridHelper(40, 40, 0x444444, 0x222222);
+        // Add grid helper at floor level
+        const gridHelper = new THREE.GridHelper(40, 40, 0x666666, 0x333333);
+        gridHelper.position.y = 0;
         this.threeScene.add(gridHelper);
 
         // Store spot meshes
         this.threeSpotMeshes = [];
 
+        // Ensure spots are loaded before creating 3D models
+        if (this.stageSpots.length === 0) {
+            console.log('No spots available, updating spots...');
+            this.updateStageSpots();
+        }
+
         // Create initial spots
+        console.log('Creating 3D spots, count:', this.stageSpots.length);
         this.update3DSpots();
 
         // Mouse controls for camera
@@ -4163,8 +4210,13 @@ class DMXController {
 
         this.threeInitialized = true;
 
+        // Render once immediately to show scene
+        this.threeRenderer.render(this.threeScene, this.threeCamera);
+
         // Start animation loop
         this.animate3D();
+
+        console.log('Three.js initialization complete');
     }
 
     createStagePlatform() {
@@ -4210,23 +4262,37 @@ class DMXController {
     }
 
     update3DSpots() {
+        if (!this.threeScene) {
+            console.warn('Cannot update 3D spots: scene not initialized');
+            return;
+        }
+
+        console.log('Updating 3D spots, count:', this.stageSpots.length);
+
         // Remove old spot meshes
         this.threeSpotMeshes.forEach(mesh => {
             this.threeScene.remove(mesh);
             if (mesh.light) {
                 this.threeScene.remove(mesh.light);
             }
+            if (mesh.lens) {
+                this.threeScene.remove(mesh.lens);
+            }
         });
         this.threeSpotMeshes = [];
 
         // Create new spot meshes
-        this.stageSpots.forEach(spot => {
-            // Spot body (cylinder)
-            const spotGeometry = new THREE.CylinderGeometry(0.3, 0.4, 1, 16);
+        this.stageSpots.forEach((spot, index) => {
+            console.log(`Creating spot ${index}: ${spot.name} at (${spot.x}, ${spot.y}, ${spot.z})`);
+
+            // Spot body (cylinder) - make it more visible
+            const spotGeometry = new THREE.CylinderGeometry(0.4, 0.5, 1.2, 16);
             const spotMaterial = new THREE.MeshStandardMaterial({
-                color: 0x333333,
+                color: 0x444444,
                 metalness: 0.7,
-                roughness: 0.3
+                roughness: 0.3,
+                emissive: 0x222222,
+                emissiveIntensity: 0.2
             });
             const spotMesh = new THREE.Mesh(spotGeometry, spotMaterial);
             spotMesh.position.set(spot.x, spot.y, spot.z);
@@ -4234,25 +4300,45 @@ class DMXController {
             spotMesh.receiveShadow = true;
             this.threeScene.add(spotMesh);
 
-            // Light source
+            // Add a small sphere at the front for lens
+            const lensGeometry = new THREE.SphereGeometry(0.2, 16, 16);
+            const lensMaterial = new THREE.MeshStandardMaterial({
+                color: 0x111111,
+                metalness: 0.9,
+                roughness: 0.1
+            });
+            const lens = new THREE.Mesh(lensGeometry, lensMaterial);
+            lens.position.set(spot.x, spot.y - 0.7, spot.z);
+            this.threeScene.add(lens);
+            spotMesh.lens = lens;
+
+            // Light source - always create for demo
             const intensity = spot.intensity / 100;
-            if (intensity > 0.1) {
+            if (intensity > 0.05) {
                 const color = new THREE.Color(
                     spot.color[0] / 255,
                     spot.color[1] / 255,
                     spot.color[2] / 255
                 );
 
-                const light = new THREE.PointLight(color, intensity * 2, 10);
-                light.position.set(spot.x, spot.y - 0.5, spot.z);
+                const light = new THREE.PointLight(color, intensity * 3, 15);
+                light.position.set(spot.x, spot.y - 0.8, spot.z);
                 light.castShadow = true;
+                light.shadow.mapSize.width = 512;
+                light.shadow.mapSize.height = 512;
                 this.threeScene.add(light);
 
                 spotMesh.light = light;
+
+                // Update lens emissive
+                lens.material.emissive = color;
+                lens.material.emissiveIntensity = intensity * 0.8;
             }
 
             this.threeSpotMeshes.push(spotMesh);
         });
+
+        console.log('3D spots created:', this.threeSpotMeshes.length);
     }
 
     setup3DControls() {
@@ -4289,7 +4375,7 @@ class DMXController {
             this.threeCamera.position.y += -deltaY * 0.05;
             this.threeCamera.position.y = Math.max(2, Math.min(20, this.threeCamera.position.y));
 
-            this.threeCamera.lookAt(0, 3, 0);
+            this.threeCamera.lookAt(0, 3, -4); // Look at stage center
 
             previousMousePosition = { x: e.clientX, y: e.clientY };
         });
@@ -4319,7 +4405,7 @@ class DMXController {
             this.threeCamera.position.x = newRadius * Math.cos(angle);
             this.threeCamera.position.z = newRadius * Math.sin(angle);
 
-            this.threeCamera.lookAt(0, 3, 0);
+            this.threeCamera.lookAt(0, 3, -4); // Look at stage center
         });
     }
 
@@ -4378,6 +4464,18 @@ class DMXController {
                     mesh.material.emissiveIntensity = intensity * 0.5;
                 } else {
                     mesh.material.emissiveIntensity = 0;
+                }
+
+                // Update lens emissive
+                if (mesh.lens && intensity > 0.05) {
+                    mesh.lens.material.emissive = new THREE.Color(
+                        spot.color[0] / 255,
+                        spot.color[1] / 255,
+                        spot.color[2] / 255
+                    );
+                    mesh.lens.material.emissiveIntensity = intensity * 0.8;
+                } else if (mesh.lens) {
+                    mesh.lens.material.emissiveIntensity = 0;
                 }
             });
 
