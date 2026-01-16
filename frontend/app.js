@@ -235,7 +235,10 @@ class DMXController {
 
         // Initialize stage visualizer if switching to stage tab
         if (tabName === 'stage') {
-            setTimeout(() => this.initStageVisualizer(), 100);
+            setTimeout(() => {
+                this.initStageVisualizer();
+                this.restoreStageDemoState();
+            }, 100);
         }
     }
     
@@ -3419,17 +3422,52 @@ class DMXController {
         if (!canvas) return;
 
         let isDragging = false;
+        let isDraggingSpot = false;
+        let draggedSpot = null;
         let lastX = 0;
         let lastY = 0;
 
         canvas.addEventListener('mousedown', (e) => {
-            isDragging = true;
+            const rect = canvas.getBoundingClientRect();
+            const x = e.clientX - rect.left;
+            const y = e.clientY - rect.top;
+
+            // Check if clicking on a spot
+            const spot = this.getSpotAtPosition(x, y);
+
+            if (spot && (this.stageView === 'top' || this.stageView === 'front')) {
+                isDraggingSpot = true;
+                draggedSpot = spot;
+                canvas.style.cursor = 'grabbing';
+            } else {
+                isDragging = true;
+            }
+
             lastX = e.clientX;
             lastY = e.clientY;
         });
 
         canvas.addEventListener('mousemove', (e) => {
-            if (isDragging && this.stageView === 'perspective') {
+            const rect = canvas.getBoundingClientRect();
+            const x = e.clientX - rect.left;
+            const y = e.clientY - rect.top;
+
+            if (isDraggingSpot && draggedSpot) {
+                // Move spot based on view
+                const deltaX = (e.clientX - lastX) / 30; // Scale factor
+                const deltaY = (e.clientY - lastY) / 30;
+
+                if (this.stageView === 'top') {
+                    draggedSpot.x += deltaX;
+                    draggedSpot.z += deltaY;
+                } else if (this.stageView === 'front') {
+                    draggedSpot.x += deltaX;
+                    draggedSpot.y -= deltaY;
+                }
+
+                lastX = e.clientX;
+                lastY = e.clientY;
+            } else if (isDragging && this.stageView === 'perspective') {
                 const deltaX = e.clientX - lastX;
                 const deltaY = e.clientY - lastY;
 
@@ -3438,6 +3476,14 @@ class DMXController {
 
                 lastX = e.clientX;
                 lastY = e.clientY;
+            } else {
+                // Update cursor if hovering over spot
+                const spot = this.getSpotAtPosition(x, y);
+                if (spot && (this.stageView === 'top' || this.stageView === 'front')) {
+                    canvas.style.cursor = 'grab';
+                } else {
+                    canvas.style.cursor = 'default';
+                }
             }
 
             // Show spot details on hover
@@ -3446,10 +3492,16 @@ class DMXController {
 
         canvas.addEventListener('mouseup', () => {
             isDragging = false;
+            isDraggingSpot = false;
+            draggedSpot = null;
+            canvas.style.cursor = 'default';
         });
 
         canvas.addEventListener('mouseleave', () => {
             isDragging = false;
+            isDraggingSpot = false;
+            draggedSpot = null;
+            canvas.style.cursor = 'default';
             this.hideSpotDetails();
         });
 
@@ -3459,6 +3511,46 @@ class DMXController {
             this.stageCamera.z += e.deltaY * 0.01;
             this.stageCamera.z = Math.max(5, Math.min(20, this.stageCamera.z));
         });
+    }
+
+    getSpotAtPosition(x, y) {
+        const canvas = document.getElementById('stageCanvas');
+        const width = canvas.width;
+        const height = canvas.height;
+
+        if (this.stageView === 'top') {
+            const scale = 30;
+            const centerX = width / 2;
+            const centerY = height / 2;
+
+            for (const spot of this.stageSpots) {
+                const x2d = centerX + spot.x * scale;
+                const y2d = centerY + spot.z * scale;
+                const radius = 15;
+
+                const dist = Math.sqrt((x - x2d) ** 2 + (y - y2d) ** 2);
+                if (dist < radius) {
+                    return spot;
+                }
+            }
+        } else if (this.stageView === 'front') {
+            const scale = 30;
+            const centerX = width / 2;
+            const baseY = height - 100;
+
+            for (const spot of this.stageSpots) {
+                const x2d = centerX + spot.x * scale;
+                const y2d = baseY - spot.y * scale;
+                const radius = 15;
+
+                const dist = Math.sqrt((x - x2d) ** 2 + (y - y2d) ** 2);
+                if (dist < radius) {
+                    return spot;
+                }
+            }
+        }
+
+        return null;
     }
 
     handleStageHover(e) {
@@ -3525,30 +3617,64 @@ class DMXController {
             btn.classList.remove('active');
         });
         document.querySelector(`[data-view="${view}"]`).classList.add('active');
+
+        // Switch between 2D canvas and 3D Three.js
+        const canvas2D = document.getElementById('stageCanvas');
+        const container3D = document.getElementById('stage3DContainer');
+
+        if (view === '3d') {
+            // Show 3D container, hide 2D canvas
+            canvas2D.style.display = 'none';
+            container3D.style.display = 'block';
+
+            // Initialize Three.js if not already done
+            if (!this.threeInitialized) {
+                this.initThreeJS();
+            }
+        } else {
+            // Show 2D canvas, hide 3D container
+            canvas2D.style.display = 'block';
+            container3D.style.display = 'none';
+        }
     }
 
     toggleStageDemoMode() {
         this.stageDemoMode = !this.stageDemoMode;
         this.stageDemoTime = 0; // Reset animation time
 
-        // Update button states
-        const demoBtn = document.getElementById('stageDemoModeBtn');
-        const liveBtn = document.getElementById('stageLiveModeBtn');
-
         if (this.stageDemoMode) {
-            demoBtn.classList.add('active');
-            liveBtn.classList.remove('active');
             // Add demo devices to device list
             this.addDemoDevices();
         } else {
-            demoBtn.classList.remove('active');
-            liveBtn.classList.add('active');
             // Remove demo devices from device list
             this.removeDemoDevices();
         }
 
+        // Update button states
+        this.updateStageDemoButtons();
+
         // Regenerate spots
         this.updateStageSpots();
+    }
+
+    updateStageDemoButtons() {
+        const demoBtn = document.getElementById('stageDemoModeBtn');
+        const liveBtn = document.getElementById('stageLiveModeBtn');
+
+        if (!demoBtn || !liveBtn) return;
+
+        if (this.stageDemoMode) {
+            demoBtn.classList.add('active');
+            liveBtn.classList.remove('active');
+        } else {
+            demoBtn.classList.remove('active');
+            liveBtn.classList.add('active');
+        }
+    }
+
+    restoreStageDemoState() {
+        // Restore demo mode button states after tab switch
+        this.updateStageDemoButtons();
     }
 
     addDemoDevices() {
@@ -3963,6 +4089,305 @@ class DMXController {
         // Hide overlay
         overlay.classList.remove('visible');
         container.classList.remove('hide-cursor');
+    }
+
+    // ===== Three.js 3D View =====
+    initThreeJS() {
+        if (this.threeInitialized || typeof THREE === 'undefined') return;
+
+        const container = document.getElementById('stage3DContainer');
+        if (!container) return;
+
+        // Scene setup
+        this.threeScene = new THREE.Scene();
+        this.threeScene.background = new THREE.Color(0x0a0e1a);
+
+        // Camera setup
+        this.threeCamera = new THREE.PerspectiveCamera(
+            75,
+            container.clientWidth / container.clientHeight,
+            0.1,
+            1000
+        );
+        this.threeCamera.position.set(15, 12, 15);
+        this.threeCamera.lookAt(0, 0, 0);
+
+        // Renderer setup
+        this.threeRenderer = new THREE.WebGLRenderer({ antialias: true });
+        this.threeRenderer.setSize(container.clientWidth, container.clientHeight);
+        this.threeRenderer.shadowMap.enabled = true;
+        this.threeRenderer.shadowMap.type = THREE.PCFSoftShadowMap;
+        container.appendChild(this.threeRenderer.domElement);
+
+        // Lighting
+        const ambientLight = new THREE.AmbientLight(0x404040, 0.5);
+        this.threeScene.add(ambientLight);
+
+        const mainLight = new THREE.DirectionalLight(0xffffff, 0.8);
+        mainLight.position.set(10, 20, 10);
+        mainLight.castShadow = true;
+        mainLight.shadow.mapSize.width = 2048;
+        mainLight.shadow.mapSize.height = 2048;
+        mainLight.shadow.camera.near = 0.5;
+        mainLight.shadow.camera.far = 500;
+        mainLight.shadow.camera.left = -30;
+        mainLight.shadow.camera.right = 30;
+        mainLight.shadow.camera.top = 30;
+        mainLight.shadow.camera.bottom = -30;
+        this.threeScene.add(mainLight);
+
+        // Add stage platform
+        this.createStagePlatform();
+
+        // Add grid helper
+        const gridHelper = new THREE.GridHelper(40, 40, 0x444444, 0x222222);
+        this.threeScene.add(gridHelper);
+
+        // Store spot meshes
+        this.threeSpotMeshes = [];
+
+        // Create initial spots
+        this.update3DSpots();
+
+        // Mouse controls for camera
+        this.setup3DControls();
+
+        // Handle resize
+        window.addEventListener('resize', () => {
+            if (this.stageView === '3d' && container.clientWidth > 0) {
+                this.threeCamera.aspect = container.clientWidth / container.clientHeight;
+                this.threeCamera.updateProjectionMatrix();
+                this.threeRenderer.setSize(container.clientWidth, container.clientHeight);
+            }
+        });
+
+        this.threeInitialized = true;
+
+        // Start animation loop
+        this.animate3D();
+    }
+
+    createStagePlatform() {
+        // Stage floor
+        const floorGeometry = new THREE.BoxGeometry(30, 0.5, 20);
+        const floorMaterial = new THREE.MeshStandardMaterial({
+            color: 0x1a1f2e,
+            roughness: 0.8,
+            metalness: 0.2
+        });
+        const floor = new THREE.Mesh(floorGeometry, floorMaterial);
+        floor.position.set(0, -0.25, -4);
+        floor.receiveShadow = true;
+        this.threeScene.add(floor);
+
+        // Stage edges (decorative)
+        const edgeMaterial = new THREE.MeshStandardMaterial({
+            color: 0x3b82f6,
+            emissive: 0x1e40af,
+            emissiveIntensity: 0.3
+        });
+
+        // Front edge
+        const frontEdge = new THREE.Mesh(
+            new THREE.BoxGeometry(30, 0.8, 0.2),
+            edgeMaterial
+        );
+        frontEdge.position.set(0, 0.15, 6);
+        this.threeScene.add(frontEdge);
+
+        // Truss structure (simplified)
+        const trussMaterial = new THREE.MeshStandardMaterial({
+            color: 0x444444,
+            metalness: 0.8,
+            roughness: 0.2
+        });
+
+        const trussGeometry = new THREE.CylinderGeometry(0.1, 0.1, 30, 8);
+        const truss1 = new THREE.Mesh(trussGeometry, trussMaterial);
+        truss1.rotation.z = Math.PI / 2;
+        truss1.position.set(0, 8, -4);
+        this.threeScene.add(truss1);
+    }
+
+    update3DSpots() {
+        // Remove old spot meshes
+        this.threeSpotMeshes.forEach(mesh => {
+            this.threeScene.remove(mesh);
+            if (mesh.light) {
+                this.threeScene.remove(mesh.light);
+            }
+        });
+        this.threeSpotMeshes = [];
+
+        // Create new spot meshes
+        this.stageSpots.forEach(spot => {
+            // Spot body (cylinder)
+            const spotGeometry = new THREE.CylinderGeometry(0.3, 0.4, 1, 16);
+            const spotMaterial = new THREE.MeshStandardMaterial({
+                color: 0x333333,
+                metalness: 0.7,
+                roughness: 0.3
+            });
+            const spotMesh = new THREE.Mesh(spotGeometry, spotMaterial);
+            spotMesh.position.set(spot.x, spot.y, spot.z);
+            spotMesh.castShadow = true;
+            spotMesh.receiveShadow = true;
+            this.threeScene.add(spotMesh);
+
+            // Light source
+            const intensity = spot.intensity / 100;
+            if (intensity > 0.1) {
+                const color = new THREE.Color(
+                    spot.color[0] / 255,
+                    spot.color[1] / 255,
+                    spot.color[2] / 255
+                );
+
+                const light = new THREE.PointLight(color, intensity * 2, 10);
+                light.position.set(spot.x, spot.y - 0.5, spot.z);
+                light.castShadow = true;
+                this.threeScene.add(light);
+
+                spotMesh.light = light;
+            }
+
+            this.threeSpotMeshes.push(spotMesh);
+        });
+    }
+
+    setup3DControls() {
+        const container = document.getElementById('stage3DContainer');
+        if (!container) return;
+
+        let isDragging = false;
+        let previousMousePosition = { x: 0, y: 0 };
+
+        container.addEventListener('mousedown', (e) => {
+            isDragging = true;
+            previousMousePosition = { x: e.clientX, y: e.clientY };
+        });
+
+        container.addEventListener('mousemove', (e) => {
+            if (!isDragging) return;
+
+            const deltaX = e.clientX - previousMousePosition.x;
+            const deltaY = e.clientY - previousMousePosition.y;
+
+            // Rotate camera around center
+            const rotationSpeed = 0.005;
+            const radius = Math.sqrt(
+                this.threeCamera.position.x ** 2 +
+                this.threeCamera.position.z ** 2
+            );
+
+            const angle = Math.atan2(this.threeCamera.position.z, this.threeCamera.position.x);
+            const newAngle = angle - deltaX * rotationSpeed;
+
+            this.threeCamera.position.x = radius * Math.cos(newAngle);
+            this.threeCamera.position.z = radius * Math.sin(newAngle);
+
+            this.threeCamera.position.y += -deltaY * 0.05;
+            this.threeCamera.position.y = Math.max(2, Math.min(20, this.threeCamera.position.y));
+
+            this.threeCamera.lookAt(0, 3, 0);
+
+            previousMousePosition = { x: e.clientX, y: e.clientY };
+        });
+
+        container.addEventListener('mouseup', () => {
+            isDragging = false;
+        });
+
+        container.addEventListener('mouseleave', () => {
+            isDragging = false;
+        });
+
+        // Zoom with mouse wheel
+        container.addEventListener('wheel', (e) => {
+            e.preventDefault();
+            const zoomSpeed = 0.5;
+            const direction = e.deltaY > 0 ? 1 : -1;
+
+            const radius = Math.sqrt(
+                this.threeCamera.position.x ** 2 +
+                this.threeCamera.position.z ** 2
+            );
+
+            const newRadius = Math.max(5, Math.min(30, radius + direction * zoomSpeed));
+            const angle = Math.atan2(this.threeCamera.position.z, this.threeCamera.position.x);
+
+            this.threeCamera.position.x = newRadius * Math.cos(angle);
+            this.threeCamera.position.z = newRadius * Math.sin(angle);
+
+            this.threeCamera.lookAt(0, 3, 0);
+        });
+    }
+
+    animate3D() {
+        if (!this.threeInitialized || !this.threeRenderer) return;
+
+        requestAnimationFrame(() => this.animate3D());
+
+        // Only render if in 3D view
+        if (this.stageView === '3d') {
+            // Update spot data
+            if (this.stageDemoMode) {
+                this.updateDemoSpots();
+            } else {
+                this.updateStageSpotData();
+            }
+
+            // Update 3D spot visuals
+            this.threeSpotMeshes.forEach((mesh, index) => {
+                const spot = this.stageSpots[index];
+                if (!spot) return;
+
+                const intensity = spot.intensity / 100;
+
+                // Update light
+                if (mesh.light) {
+                    const color = new THREE.Color(
+                        spot.color[0] / 255,
+                        spot.color[1] / 255,
+                        spot.color[2] / 255
+                    );
+                    mesh.light.color = color;
+                    mesh.light.intensity = intensity * 2;
+                } else if (intensity > 0.1) {
+                    // Create light if it doesn't exist
+                    const color = new THREE.Color(
+                        spot.color[0] / 255,
+                        spot.color[1] / 255,
+                        spot.color[2] / 255
+                    );
+                    const light = new THREE.PointLight(color, intensity * 2, 10);
+                    light.position.copy(mesh.position);
+                    light.position.y -= 0.5;
+                    light.castShadow = true;
+                    this.threeScene.add(light);
+                    mesh.light = light;
+                }
+
+                // Update emissive color
+                if (intensity > 0.05) {
+                    mesh.material.emissive = new THREE.Color(
+                        spot.color[0] / 255,
+                        spot.color[1] / 255,
+                        spot.color[2] / 255
+                    );
+                    mesh.material.emissiveIntensity = intensity * 0.5;
+                } else {
+                    mesh.material.emissiveIntensity = 0;
+                }
+            });
+
+            this.threeRenderer.render(this.threeScene, this.threeCamera);
+
+            // Update stats
+            if (Math.random() < 0.1) {
+                this.updateStageStats();
+            }
+        }
     }
 }
 

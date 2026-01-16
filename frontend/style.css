@@ -1626,12 +1626,31 @@ canvas {
         display: none;
     }
 
+    /* Keep fullscreen button text visible on mobile */
+    .btn-fullscreen-exit span {
+        display: inline;
+    }
+
     .btn svg {
         margin: 0;
     }
 
     .header-actions .btn {
         padding: var(--spacing-xs) var(--spacing-sm);
+    }
+
+    /* Optimize fullscreen controls for mobile */
+    .fullscreen-controls-bar {
+        padding: 1rem;
+    }
+
+    .fullscreen-title {
+        font-size: 1rem;
+    }
+
+    .btn-fullscreen-exit {
+        padding: 0.5rem 1rem;
+        font-size: 0.875rem;
     }
 }
 
