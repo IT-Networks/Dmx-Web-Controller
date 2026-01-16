@@ -1586,6 +1586,7 @@ class DMXController {
             ];
             this.updateKeyframeList();
             this.drawTimeline();
+            this.renderEffectPreview();
         }, 50);
     }
 
@@ -1836,6 +1837,7 @@ class DMXController {
         this.designerKeyframes.push(newKeyframe);
         this.updateKeyframeList();
         this.drawTimeline();
+        this.renderEffectPreview();
         this.selectKeyframe(this.designerKeyframes.length - 1);
         this.showToast('Keyframe hinzugefügt', 'success');
     }
@@ -2042,6 +2044,7 @@ class DMXController {
 
                 this.updateKeyframeList();
                 this.drawTimeline();
+                this.renderEffectPreview();
             };
         });
 
@@ -2061,6 +2064,7 @@ class DMXController {
 
                 this.updateKeyframeList();
                 this.drawTimeline();
+                this.renderEffectPreview();
             };
         });
 
@@ -2093,6 +2097,7 @@ class DMXController {
 
         this.updateKeyframeList();
         this.drawTimeline();
+        this.renderEffectPreview();
         this.showToast('Keyframe gelöscht', 'success');
     }
 
@@ -2450,8 +2455,176 @@ class DMXController {
             }
         }
 
+        this.updateKeyframeList();
         this.drawTimeline();
+        this.renderEffectPreview();
         this.showToast(`Template "${templateName}" geladen`, 'success');
+    }
+
+    playEffectPreview() {
+        if (this.effectPreviewPlaying) {
+            this.stopEffectPreview();
+            return;
+        }
+
+        this.effectPreviewPlaying = true;
+        document.getElementById('previewPlayIcon').textContent = '⏸';
+
+        const duration = parseFloat(document.getElementById('customEffectDuration').value) || 10;
+        const startTime = Date.now();
+
+        const animate = () => {
+            if (!this.effectPreviewPlaying) return;
+
+            const elapsed = (Date.now() - startTime) / 1000;
+            const progress = (elapsed % duration) / duration * 100; // 0-100%
+
+            this.renderEffectPreview(progress);
+
+            this.effectPreviewAnimFrame = requestAnimationFrame(animate);
+        };
+
+        animate();
+    }
+
+    stopEffectPreview() {
+        this.effectPreviewPlaying = false;
+        document.getElementById('previewPlayIcon').textContent = '▶️';
+        if (this.effectPreviewAnimFrame) {
+            cancelAnimationFrame(this.effectPreviewAnimFrame);
+        }
+        this.renderEffectPreview(0);
+    }
+
+    renderEffectPreview(progress = 0) {
+        const canvas = document.getElementById('effectPreviewAnimCanvas');
+        if (!canvas) return;
+
+        const ctx = canvas.getContext('2d');
+        const width = canvas.width;
+        const height = canvas.height;
+
+        // Clear
+        ctx.fillStyle = '#000';
+        ctx.fillRect(0, 0, width, height);
+
+        if (this.designerKeyframes.length === 0) {
+            // No keyframes - show placeholder
+            ctx.fillStyle = '#334155';
+            ctx.font = '14px sans-serif';
+            ctx.textAlign = 'center';
+            ctx.fillText('Füge Keyframes hinzu um eine Vorschau zu sehen', width / 2, height / 2);
+            return;
+        }
+
+        // Calculate number of lights to show (simulate multiple devices)
+        const numLights = this.designerMode === 'spot' ? 8 : 1;
+        const lightWidth = width / numLights;
+
+        if (this.designerMode === 'spot') {
+            // Spot mode: show individual lights
+            for (let i = 0; i < numLights; i++) {
+                const color = this.getColorAtProgress(progress);
+
+                const x = i * lightWidth + lightWidth / 2;
+                const radius = Math.min(lightWidth * 0.4, height * 0.4);
+
+                // Draw light with glow
+                const gradient = ctx.createRadialGradient(x, height / 2, 0, x, height / 2, radius);
+                gradient.addColorStop(0, `rgba(${color[0]}, ${color[1]}, ${color[2]}, 1)`);
+                gradient.addColorStop(0.5, `rgba(${color[0]}, ${color[1]}, ${color[2]}, 0.6)`);
+                gradient.addColorStop(1, `rgba(${color[0]}, ${color[1]}, ${color[2]}, 0)`);
+
+                ctx.fillStyle = gradient;
+                ctx.beginPath();
+                ctx.arc(x, height / 2, radius, 0, Math.PI * 2);
+                ctx.fill();
+            }
+        } else {
+            // Strip mode: show LED strip
+            const ledCount = 30;
+            const ledWidth = width / ledCount;
+
+            for (let i = 0; i < ledCount; i++) {
+                const color = this.getColorAtProgress(progress);
+
+                ctx.fillStyle = `rgb(${color[0]}, ${color[1]}, ${color[2]})`;
+                ctx.fillRect(i * ledWidth, height * 0.3, ledWidth - 2, height * 0.4);
+            }
+        }
+
+        // Draw progress indicator
+        const progressX = (progress / 100) * width;
+        ctx.strokeStyle = '#3b82f6';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(progressX, 0);
+        ctx.lineTo(progressX, height);
+        ctx.stroke();
+    }
+
+    getColorAtProgress(progress) {
+        if (this.designerKeyframes.length === 0) {
+            return [0, 0, 0];
+        }
+
+        // Sort keyframes by time
+        const sorted = [...this.designerKeyframes].sort((a, b) => a.time - b.time);
+
+        // Find surrounding keyframes
+        let beforeKf = sorted[0];
+        let afterKf = sorted[sorted.length - 1];
+
+        for (let i = 0; i < sorted.length - 1; i++) {
+            if (sorted[i].time <= progress && sorted[i + 1].time >= progress) {
+                beforeKf = sorted[i];
+                afterKf = sorted[i + 1];
+                break;
+            }
+        }
+
+        // If exactly on a keyframe
+        if (beforeKf.time === progress) {
+            return this.extractColor(beforeKf);
+        }
+        if (afterKf.time === progress) {
+            return this.extractColor(afterKf);
+        }
+
+        // Interpolate between keyframes
+        const t = (progress - beforeKf.time) / (afterKf.time - beforeKf.time);
+        const beforeColor = this.extractColor(beforeKf);
+        const afterColor = this.extractColor(afterKf);
+
+        // Apply easing
+        const easedT = this.applyEasing(t, beforeKf.easing || 'linear');
+
+        return [
+            Math.round(beforeColor[0] + (afterColor[0] - beforeColor[0]) * easedT),
+            Math.round(beforeColor[1] + (afterColor[1] - beforeColor[1]) * easedT),
+            Math.round(beforeColor[2] + (afterColor[2] - beforeColor[2]) * easedT)
+        ];
+    }
+
+    extractColor(keyframe) {
+        if (this.designerMode === 'spot') {
+            return keyframe.values?.default || [0, 0, 0];
+        } else {
+            return keyframe.pattern?.color || [0, 0, 0];
+        }
+    }
+
+    applyEasing(t, easing) {
+        switch (easing) {
+            case 'ease-in':
+                return t * t;
+            case 'ease-out':
+                return t * (2 - t);
+            case 'ease-in-out':
+                return t < 0.5 ? 2 * t * t : -1 + (4 - 2 * t) * t;
+            default: // linear
+                return t;
+        }
     }
 
     async saveCustomEffect() {

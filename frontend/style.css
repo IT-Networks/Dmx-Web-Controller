@@ -1795,6 +1795,47 @@ canvas {
     flex-shrink: 0;
 }
 
+/* Effect Preview Section */
+.effect-preview-section {
+    margin-top: 1.5rem;
+    padding: 1rem;
+    background: var(--bg-primary);
+    border-radius: var(--radius-md);
+    border: 1px solid var(--border-color);
+}
+
+.effect-preview-section h4 {
+    font-size: 1rem;
+    font-weight: 600;
+    color: var(--text-primary);
+    margin-bottom: 1rem;
+}
+
+.effect-preview-container {
+    background: var(--bg-secondary);
+    border-radius: var(--radius-md);
+    padding: 1rem;
+    margin-bottom: 1rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+#effectPreviewAnimCanvas {
+    display: block;
+    width: 100%;
+    max-width: 600px;
+    height: 100px;
+    border-radius: var(--radius-sm);
+    background: #000;
+}
+
+.preview-controls-inline {
+    display: flex;
+    gap: 0.5rem;
+    justify-content: center;
+}
+
 /* Touch-friendly Keyframe Markers on Touch Devices */
 @media (hover: none) and (pointer: coarse) {
     .keyframe-marker {

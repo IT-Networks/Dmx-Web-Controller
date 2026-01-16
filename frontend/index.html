@@ -663,6 +663,22 @@
                             <input type="number" id="customEffectDuration" value="10" min="1" max="60" step="0.5" class="input">
                         </div>
                     </div>
+
+                    <!-- Effect Preview -->
+                    <div class="effect-preview-section">
+                        <h4>🎬 Effekt-Vorschau</h4>
+                        <div class="effect-preview-container">
+                            <canvas id="effectPreviewAnimCanvas" width="600" height="100"></canvas>
+                        </div>
+                        <div class="preview-controls-inline">
+                            <button class="btn btn-secondary btn-sm" onclick="app.playEffectPreview()">
+                                <span id="previewPlayIcon">▶️</span> <span>Vorschau</span>
+                            </button>
+                            <button class="btn btn-secondary btn-sm" onclick="app.stopEffectPreview()">
+                                <span>⏹</span> <span>Stop</span>
+                            </button>
+                        </div>
+                    </div>
                 </div>
 
                 <!-- Timeline -->
