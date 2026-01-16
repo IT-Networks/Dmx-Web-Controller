@@ -65,6 +65,19 @@
                     <span>Timeline</span>
                 </button>
 
+                <button class="menu-item" data-tab="stage" onclick="app.switchTab('stage')">
+                    <svg width="20" height="20" viewBox="0 0 20 20">
+                        <path d="M2 14 L2 18 L18 18 L18 14 Z" fill="currentColor" opacity="0.3"/>
+                        <circle cx="5" cy="8" r="1.5" fill="currentColor"/>
+                        <path d="M5 8 L4 14" stroke="currentColor" stroke-width="1.5" opacity="0.6"/>
+                        <circle cx="10" cy="6" r="1.5" fill="currentColor"/>
+                        <path d="M10 6 L10 14" stroke="currentColor" stroke-width="1.5" opacity="0.6"/>
+                        <circle cx="15" cy="8" r="1.5" fill="currentColor"/>
+                        <path d="M15 8 L16 14" stroke="currentColor" stroke-width="1.5" opacity="0.6"/>
+                    </svg>
+                    <span>Bühne</span>
+                </button>
+
                 <button class="menu-item" data-tab="settings" onclick="app.switchTab('settings')">
                     <svg width="20" height="20" viewBox="0 0 20 20">
                         <circle cx="10" cy="10" r="3" fill="none" stroke="currentColor" stroke-width="2"/>
@@ -299,6 +312,120 @@
                             <div class="info-row">
                                 <span>Platform:</span>
                                 <strong id="platformInfo">Web</strong>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="tab-content" id="stageTab">
+                <div class="stage-visualizer">
+                    <!-- Controls Bar -->
+                    <div class="stage-controls">
+                        <div class="stage-control-group">
+                            <label>Ansicht:</label>
+                            <div class="button-group">
+                                <button class="btn-option active" data-view="perspective" onclick="app.setStageView('perspective')">
+                                    <span>🎭 Perspektive</span>
+                                </button>
+                                <button class="btn-option" data-view="top" onclick="app.setStageView('top')">
+                                    <span>⬇️ Draufsicht</span>
+                                </button>
+                                <button class="btn-option" data-view="front" onclick="app.setStageView('front')">
+                                    <span>👁️ Frontal</span>
+                                </button>
+                            </div>
+                        </div>
+
+                        <div class="stage-control-group">
+                            <label>Optionen:</label>
+                            <label class="checkbox-label">
+                                <input type="checkbox" id="showBeamsCheckbox" checked onchange="app.toggleStageBeams()">
+                                <span>Licht-Strahlen</span>
+                            </label>
+                            <label class="checkbox-label">
+                                <input type="checkbox" id="showGridCheckbox" checked onchange="app.toggleStageGrid()">
+                                <span>Raster</span>
+                            </label>
+                            <label class="checkbox-label">
+                                <input type="checkbox" id="showLabelsCheckbox" checked onchange="app.toggleStageLabels()">
+                                <span>Beschriftung</span>
+                            </label>
+                        </div>
+
+                        <div class="stage-control-group">
+                            <button class="btn btn-secondary btn-sm" onclick="app.resetStageCamera()">
+                                <span>📷 Kamera zurücksetzen</span>
+                            </button>
+                            <button class="btn btn-secondary btn-sm" onclick="app.toggleStageFullscreen()">
+                                <span id="fullscreenIcon">⛶</span> <span>Vollbild</span>
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Stage Canvas -->
+                    <div class="stage-canvas-container" id="stageCanvasContainer">
+                        <canvas id="stageCanvas"></canvas>
+
+                        <!-- Stage Info Overlay -->
+                        <div class="stage-info-overlay">
+                            <div class="stage-stats">
+                                <div class="stat-item">
+                                    <span class="stat-label">Spots aktiv:</span>
+                                    <span class="stat-value" id="stageActiveSpots">0</span>
+                                </div>
+                                <div class="stat-item">
+                                    <span class="stat-label">Gesamt-Leistung:</span>
+                                    <span class="stat-value" id="stageTotalPower">0W</span>
+                                </div>
+                                <div class="stat-item">
+                                    <span class="stat-label">FPS:</span>
+                                    <span class="stat-value" id="stageFPS">60</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Spot Details Popup (shown on hover) -->
+                        <div class="spot-details-popup" id="spotDetailsPopup" style="display: none;">
+                            <div class="spot-detail-header">
+                                <strong id="spotDetailName">Spot 1</strong>
+                            </div>
+                            <div class="spot-detail-body">
+                                <div class="spot-detail-row">
+                                    <span>Position:</span>
+                                    <span id="spotDetailPosition">X:0 Y:0 Z:0</span>
+                                </div>
+                                <div class="spot-detail-row">
+                                    <span>Farbe:</span>
+                                    <div class="spot-detail-color" id="spotDetailColor"></div>
+                                </div>
+                                <div class="spot-detail-row">
+                                    <span>Intensität:</span>
+                                    <span id="spotDetailIntensity">0%</span>
+                                </div>
+                                <div class="spot-detail-row">
+                                    <span>DMX:</span>
+                                    <span id="spotDetailDMX">Ch 1-6</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Legend -->
+                    <div class="stage-legend">
+                        <h4>Legende</h4>
+                        <div class="legend-items">
+                            <div class="legend-item">
+                                <div class="legend-icon spot-on"></div>
+                                <span>Spot aktiv</span>
+                            </div>
+                            <div class="legend-item">
+                                <div class="legend-icon spot-off"></div>
+                                <span>Spot aus</span>
+                            </div>
+                            <div class="legend-item">
+                                <div class="legend-icon spot-selected"></div>
+                                <span>Ausgewählt</span>
                             </div>
                         </div>
                     </div>

@@ -213,6 +213,7 @@ class DMXController {
             'scenes': ['Szenen', 'Gespeicherte Lichtstimmungen'],
             'effects': ['Effekte', 'Dynamische Lichteffekte'],
             'sequences': ['Timeline', 'Erstelle Sequenzen aus Szenen und Effekten'],
+            'stage': ['Bühnen-Visualisierung', 'Live-Darstellung aller Spots auf der Bühne'],
             'settings': ['Einstellungen', 'App-Konfiguration und Audio-Einstellungen']
         };
 
@@ -226,10 +227,16 @@ class DMXController {
             'scenes': '<button class="btn btn-primary" onclick="app.showAddScene()"><svg width="20" height="20" viewBox="0 0 20 20"><path d="M10 3 L10 17 M3 10 L17 10" stroke="currentColor" stroke-width="2"/></svg><span>Szene erstellen</span></button>',
             'effects': '',
             'sequences': '<button class="btn btn-primary" onclick="app.showAddSequence()"><svg width="20" height="20" viewBox="0 0 20 20"><path d="M10 3 L10 17 M3 10 L17 10" stroke="currentColor" stroke-width="2"/></svg><span>Timeline hinzufügen</span></button>',
+            'stage': '',
             'settings': ''
         };
 
         document.getElementById('headerActions').innerHTML = buttons[tabName] || '';
+
+        // Initialize stage visualizer if switching to stage tab
+        if (tabName === 'stage') {
+            setTimeout(() => this.initStageVisualizer(), 100);
+        }
     }
     
     // ===== Devices =====
@@ -2866,6 +2873,593 @@ class DMXController {
         } catch (error) {
             console.error('Error creating custom effect:', error);
             this.showToast('Fehler beim Erstellen', 'error');
+        }
+    }
+
+    // ===== Stage Visualizer =====
+    initStageVisualizer() {
+        if (this.stageInitialized) return;
+
+        this.stageView = 'perspective';
+        this.showBeams = true;
+        this.showGrid = true;
+        this.showLabels = true;
+        this.stageCamera = { x: 0, y: -5, z: 10, rotX: -30, rotY: 0 };
+        this.stageSpots = [];
+        this.stageAnimationFrame = null;
+        this.stageFPS = 60;
+        this.stageLastFrame = Date.now();
+
+        const canvas = document.getElementById('stageCanvas');
+        if (!canvas) return;
+
+        const container = document.getElementById('stageCanvasContainer');
+        canvas.width = container.clientWidth;
+        canvas.height = container.clientHeight;
+
+        this.stageCtx = canvas.getContext('2d');
+        this.stageInitialized = true;
+
+        // Generate spots from devices
+        this.updateStageSpots();
+
+        // Start rendering
+        this.renderStageFrame();
+
+        // Handle resize
+        window.addEventListener('resize', () => this.resizeStageCanvas());
+
+        // Handle mouse interaction
+        this.setupStageInteraction();
+    }
+
+    resizeStageCanvas() {
+        const canvas = document.getElementById('stageCanvas');
+        const container = document.getElementById('stageCanvasContainer');
+        if (!canvas || !container) return;
+
+        canvas.width = container.clientWidth;
+        canvas.height = container.clientHeight;
+    }
+
+    updateStageSpots() {
+        this.stageSpots = this.devices.map((device, index) => {
+            // Calculate position in 3D space (arrange in grid)
+            const gridSize = Math.ceil(Math.sqrt(this.devices.length));
+            const row = Math.floor(index / gridSize);
+            const col = index % gridSize;
+            const spacing = 3;
+
+            return {
+                id: device.id,
+                name: device.name,
+                x: (col - gridSize / 2) * spacing,
+                y: 3, // Height above stage
+                z: (row - gridSize / 2) * spacing,
+                color: [255, 255, 255],
+                intensity: 0,
+                dmxValues: device.current_values || {},
+                device: device
+            };
+        });
+
+        // Update stats
+        this.updateStageStats();
+    }
+
+    updateStageStats() {
+        const activeSpots = this.stageSpots.filter(s => s.intensity > 0).length;
+        const totalPower = this.stageSpots.reduce((sum, s) => {
+            return sum + (s.intensity / 100 * 200); // Assume 200W per spot at full
+        }, 0);
+
+        const activeEl = document.getElementById('stageActiveSpots');
+        const powerEl = document.getElementById('stageTotalPower');
+        const fpsEl = document.getElementById('stageFPS');
+
+        if (activeEl) activeEl.textContent = activeSpots;
+        if (powerEl) powerEl.textContent = Math.round(totalPower) + 'W';
+        if (fpsEl) fpsEl.textContent = Math.round(this.stageFPS);
+    }
+
+    renderStageFrame() {
+        if (!this.stageInitialized || this.currentTab !== 'stage') return;
+
+        // Calculate FPS
+        const now = Date.now();
+        const delta = now - this.stageLastFrame;
+        this.stageFPS = 1000 / delta;
+        this.stageLastFrame = now;
+
+        // Update spot data from devices
+        this.updateStageSpotData();
+
+        // Clear canvas
+        const canvas = document.getElementById('stageCanvas');
+        const ctx = this.stageCtx;
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+        // Draw based on current view
+        if (this.stageView === 'perspective') {
+            this.renderPerspectiveView();
+        } else if (this.stageView === 'top') {
+            this.renderTopView();
+        } else if (this.stageView === 'front') {
+            this.renderFrontView();
+        }
+
+        // Update stats periodically
+        if (Math.random() < 0.1) {
+            this.updateStageStats();
+        }
+
+        // Continue animation
+        this.stageAnimationFrame = requestAnimationFrame(() => this.renderStageFrame());
+    }
+
+    updateStageSpotData() {
+        this.stageSpots.forEach(spot => {
+            const device = this.devices.find(d => d.id === spot.id);
+            if (!device || !device.current_values) return;
+
+            const values = device.current_values;
+
+            // Extract RGB color
+            if (device.channels) {
+                const redCh = device.channels.find(ch => ch.type === 'red');
+                const greenCh = device.channels.find(ch => ch.type === 'green');
+                const blueCh = device.channels.find(ch => ch.type === 'blue');
+                const dimmerCh = device.channels.find(ch => ch.type === 'dimmer');
+
+                if (redCh && greenCh && blueCh) {
+                    spot.color = [
+                        values[redCh.channel] || 0,
+                        values[greenCh.channel] || 0,
+                        values[blueCh.channel] || 0
+                    ];
+                }
+
+                if (dimmerCh) {
+                    spot.intensity = ((values[dimmerCh.channel] || 0) / 255) * 100;
+                } else {
+                    // Calculate intensity from RGB average
+                    const avg = (spot.color[0] + spot.color[1] + spot.color[2]) / 3;
+                    spot.intensity = (avg / 255) * 100;
+                }
+            }
+
+            spot.dmxValues = values;
+        });
+    }
+
+    renderPerspectiveView() {
+        const canvas = document.getElementById('stageCanvas');
+        const ctx = this.stageCtx;
+        const width = canvas.width;
+        const height = canvas.height;
+
+        // Draw stage floor
+        this.drawStageFloor(ctx, width, height);
+
+        // Sort spots by distance for correct layering
+        const sortedSpots = [...this.stageSpots].sort((a, b) => {
+            return (b.z - a.z); // Back to front
+        });
+
+        // Draw spots with beams
+        sortedSpots.forEach(spot => {
+            this.drawSpotPerspective(ctx, spot, width, height);
+        });
+    }
+
+    drawStageFloor(ctx, width, height) {
+        // Draw grid if enabled
+        if (!this.showGrid) return;
+
+        ctx.save();
+        ctx.strokeStyle = 'rgba(100, 116, 139, 0.3)';
+        ctx.lineWidth = 1;
+
+        const gridSize = 20;
+        const gridSpacing = 40;
+        const centerX = width / 2;
+        const centerY = height * 0.7;
+
+        for (let i = -gridSize; i <= gridSize; i++) {
+            // Horizontal lines
+            const y1 = centerY + (i * gridSpacing) * 0.3;
+            const y2 = centerY + (i * gridSpacing) * 0.3;
+            ctx.beginPath();
+            ctx.moveTo(centerX - gridSize * gridSpacing, y1);
+            ctx.lineTo(centerX + gridSize * gridSpacing, y2);
+            ctx.stroke();
+
+            // Vertical lines with perspective
+            const x = centerX + i * gridSpacing;
+            ctx.beginPath();
+            ctx.moveTo(x, centerY - gridSize * gridSpacing * 0.3);
+            ctx.lineTo(x, centerY + gridSize * gridSpacing * 0.3);
+            ctx.stroke();
+        }
+
+        ctx.restore();
+    }
+
+    drawSpotPerspective(ctx, spot, width, height) {
+        // Project 3D to 2D with perspective
+        const scale = 50;
+        const perspective = 800;
+        const centerX = width / 2;
+        const centerY = height * 0.7;
+
+        const z = spot.z + 5; // Add offset for perspective
+        const projScale = perspective / (perspective + z * scale);
+
+        const x2d = centerX + spot.x * scale * projScale;
+        const y2d = centerY - spot.y * scale * projScale + spot.z * scale * 0.3;
+
+        // Draw light beam if enabled
+        if (this.showBeams && spot.intensity > 5) {
+            this.drawLightBeam(ctx, x2d, y2d, spot, projScale);
+        }
+
+        // Draw spot fixture
+        const spotRadius = 15 * projScale;
+        const intensity = spot.intensity / 100;
+
+        // Glow effect
+        if (intensity > 0.1) {
+            const gradient = ctx.createRadialGradient(x2d, y2d, 0, x2d, y2d, spotRadius * 2);
+            gradient.addColorStop(0, `rgba(${spot.color[0]}, ${spot.color[1]}, ${spot.color[2]}, ${intensity * 0.5})`);
+            gradient.addColorStop(1, `rgba(${spot.color[0]}, ${spot.color[1]}, ${spot.color[2]}, 0)`);
+
+            ctx.fillStyle = gradient;
+            ctx.beginPath();
+            ctx.arc(x2d, y2d, spotRadius * 2, 0, Math.PI * 2);
+            ctx.fill();
+        }
+
+        // Spot body
+        ctx.fillStyle = intensity > 0.1 ?
+            `rgb(${Math.round(spot.color[0] * intensity)}, ${Math.round(spot.color[1] * intensity)}, ${Math.round(spot.color[2] * intensity)})` :
+            '#334155';
+        ctx.beginPath();
+        ctx.arc(x2d, y2d, spotRadius, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Border
+        ctx.strokeStyle = intensity > 0.5 ? '#fbbf24' : '#64748b';
+        ctx.lineWidth = 2;
+        ctx.stroke();
+
+        // Label if enabled
+        if (this.showLabels) {
+            ctx.fillStyle = '#e2e8f0';
+            ctx.font = `${10 * projScale}px sans-serif`;
+            ctx.textAlign = 'center';
+            ctx.fillText(spot.name, x2d, y2d + spotRadius + 15 * projScale);
+        }
+    }
+
+    drawLightBeam(ctx, x, y, spot, scale) {
+        const beamLength = 200 * scale;
+        const beamWidth = 60 * scale;
+        const intensity = spot.intensity / 100;
+
+        ctx.save();
+        ctx.globalAlpha = intensity * 0.4;
+
+        // Create beam gradient
+        const gradient = ctx.createLinearGradient(x, y, x, y + beamLength);
+        gradient.addColorStop(0, `rgba(${spot.color[0]}, ${spot.color[1]}, ${spot.color[2]}, 0.8)`);
+        gradient.addColorStop(1, `rgba(${spot.color[0]}, ${spot.color[1]}, ${spot.color[2]}, 0)`);
+
+        ctx.fillStyle = gradient;
+        ctx.beginPath();
+        ctx.moveTo(x, y);
+        ctx.lineTo(x - beamWidth / 2, y + beamLength);
+        ctx.lineTo(x + beamWidth / 2, y + beamLength);
+        ctx.closePath();
+        ctx.fill();
+
+        ctx.restore();
+    }
+
+    renderTopView() {
+        const canvas = document.getElementById('stageCanvas');
+        const ctx = this.stageCtx;
+        const width = canvas.width;
+        const height = canvas.height;
+
+        const scale = 30;
+        const centerX = width / 2;
+        const centerY = height / 2;
+
+        // Draw grid
+        if (this.showGrid) {
+            ctx.strokeStyle = 'rgba(100, 116, 139, 0.3)';
+            ctx.lineWidth = 1;
+
+            for (let i = -10; i <= 10; i++) {
+                ctx.beginPath();
+                ctx.moveTo(centerX + i * scale, centerY - 10 * scale);
+                ctx.lineTo(centerX + i * scale, centerY + 10 * scale);
+                ctx.stroke();
+
+                ctx.beginPath();
+                ctx.moveTo(centerX - 10 * scale, centerY + i * scale);
+                ctx.lineTo(centerX + 10 * scale, centerY + i * scale);
+                ctx.stroke();
+            }
+        }
+
+        // Draw spots
+        this.stageSpots.forEach(spot => {
+            const x2d = centerX + spot.x * scale;
+            const y2d = centerY + spot.z * scale;
+            const radius = 20;
+            const intensity = spot.intensity / 100;
+
+            // Glow
+            if (intensity > 0.1) {
+                const gradient = ctx.createRadialGradient(x2d, y2d, 0, x2d, y2d, radius * 3);
+                gradient.addColorStop(0, `rgba(${spot.color[0]}, ${spot.color[1]}, ${spot.color[2]}, ${intensity * 0.6})`);
+                gradient.addColorStop(1, `rgba(${spot.color[0]}, ${spot.color[1]}, ${spot.color[2]}, 0)`);
+
+                ctx.fillStyle = gradient;
+                ctx.beginPath();
+                ctx.arc(x2d, y2d, radius * 3, 0, Math.PI * 2);
+                ctx.fill();
+            }
+
+            // Spot
+            ctx.fillStyle = intensity > 0.1 ?
+                `rgb(${Math.round(spot.color[0] * intensity)}, ${Math.round(spot.color[1] * intensity)}, ${Math.round(spot.color[2] * intensity)})` :
+                '#334155';
+            ctx.beginPath();
+            ctx.arc(x2d, y2d, radius, 0, Math.PI * 2);
+            ctx.fill();
+
+            ctx.strokeStyle = intensity > 0.5 ? '#fbbf24' : '#64748b';
+            ctx.lineWidth = 2;
+            ctx.stroke();
+
+            // Label
+            if (this.showLabels) {
+                ctx.fillStyle = '#e2e8f0';
+                ctx.font = '11px sans-serif';
+                ctx.textAlign = 'center';
+                ctx.fillText(spot.name, x2d, y2d + radius + 15);
+            }
+        });
+    }
+
+    renderFrontView() {
+        const canvas = document.getElementById('stageCanvas');
+        const ctx = this.stageCtx;
+        const width = canvas.width;
+        const height = canvas.height;
+
+        const scale = 40;
+        const centerX = width / 2;
+        const floorY = height * 0.8;
+
+        // Draw stage line
+        ctx.strokeStyle = 'rgba(100, 116, 139, 0.5)';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(0, floorY);
+        ctx.lineTo(width, floorY);
+        ctx.stroke();
+
+        // Sort by X position
+        const sortedSpots = [...this.stageSpots].sort((a, b) => a.x - b.x);
+
+        // Draw spots
+        sortedSpots.forEach(spot => {
+            const x2d = centerX + spot.x * scale;
+            const y2d = floorY - spot.y * scale;
+            const radius = 20;
+            const intensity = spot.intensity / 100;
+
+            // Beam
+            if (this.showBeams && intensity > 0.1) {
+                const beamLength = 300;
+                const beamWidth = 80;
+
+                ctx.save();
+                ctx.globalAlpha = intensity * 0.3;
+
+                const gradient = ctx.createLinearGradient(x2d, y2d, x2d, y2d + beamLength);
+                gradient.addColorStop(0, `rgba(${spot.color[0]}, ${spot.color[1]}, ${spot.color[2]}, 0.8)`);
+                gradient.addColorStop(1, `rgba(${spot.color[0]}, ${spot.color[1]}, ${spot.color[2]}, 0)`);
+
+                ctx.fillStyle = gradient;
+                ctx.beginPath();
+                ctx.moveTo(x2d, y2d);
+                ctx.lineTo(x2d - beamWidth / 2, y2d + beamLength);
+                ctx.lineTo(x2d + beamWidth / 2, y2d + beamLength);
+                ctx.closePath();
+                ctx.fill();
+
+                ctx.restore();
+            }
+
+            // Glow
+            if (intensity > 0.1) {
+                const gradient = ctx.createRadialGradient(x2d, y2d, 0, x2d, y2d, radius * 2.5);
+                gradient.addColorStop(0, `rgba(${spot.color[0]}, ${spot.color[1]}, ${spot.color[2]}, ${intensity * 0.6})`);
+                gradient.addColorStop(1, `rgba(${spot.color[0]}, ${spot.color[1]}, ${spot.color[2]}, 0)`);
+
+                ctx.fillStyle = gradient;
+                ctx.beginPath();
+                ctx.arc(x2d, y2d, radius * 2.5, 0, Math.PI * 2);
+                ctx.fill();
+            }
+
+            // Spot
+            ctx.fillStyle = intensity > 0.1 ?
+                `rgb(${Math.round(spot.color[0] * intensity)}, ${Math.round(spot.color[1] * intensity)}, ${Math.round(spot.color[2] * intensity)})` :
+                '#334155';
+            ctx.beginPath();
+            ctx.arc(x2d, y2d, radius, 0, Math.PI * 2);
+            ctx.fill();
+
+            ctx.strokeStyle = intensity > 0.5 ? '#fbbf24' : '#64748b';
+            ctx.lineWidth = 2;
+            ctx.stroke();
+
+            // Label
+            if (this.showLabels) {
+                ctx.fillStyle = '#e2e8f0';
+                ctx.font = '11px sans-serif';
+                ctx.textAlign = 'center';
+                ctx.fillText(spot.name, x2d, y2d - radius - 10);
+            }
+        });
+    }
+
+    setupStageInteraction() {
+        const canvas = document.getElementById('stageCanvas');
+        if (!canvas) return;
+
+        let isDragging = false;
+        let lastX = 0;
+        let lastY = 0;
+
+        canvas.addEventListener('mousedown', (e) => {
+            isDragging = true;
+            lastX = e.clientX;
+            lastY = e.clientY;
+        });
+
+        canvas.addEventListener('mousemove', (e) => {
+            if (isDragging && this.stageView === 'perspective') {
+                const deltaX = e.clientX - lastX;
+                const deltaY = e.clientY - lastY;
+
+                this.stageCamera.rotY += deltaX * 0.5;
+                this.stageCamera.rotX += deltaY * 0.5;
+
+                lastX = e.clientX;
+                lastY = e.clientY;
+            }
+
+            // Show spot details on hover
+            this.handleStageHover(e);
+        });
+
+        canvas.addEventListener('mouseup', () => {
+            isDragging = false;
+        });
+
+        canvas.addEventListener('mouseleave', () => {
+            isDragging = false;
+            this.hideSpotDetails();
+        });
+
+        // Zoom with mouse wheel
+        canvas.addEventListener('wheel', (e) => {
+            e.preventDefault();
+            this.stageCamera.z += e.deltaY * 0.01;
+            this.stageCamera.z = Math.max(5, Math.min(20, this.stageCamera.z));
+        });
+    }
+
+    handleStageHover(e) {
+        const canvas = document.getElementById('stageCanvas');
+        const rect = canvas.getBoundingClientRect();
+        const x = e.clientX - rect.left;
+        const y = e.clientY - rect.top;
+
+        // Check if hovering over a spot (simplified check for top view)
+        if (this.stageView === 'top') {
+            const width = canvas.width;
+            const height = canvas.height;
+            const scale = 30;
+            const centerX = width / 2;
+            const centerY = height / 2;
+
+            for (const spot of this.stageSpots) {
+                const x2d = centerX + spot.x * scale;
+                const y2d = centerY + spot.z * scale;
+                const distance = Math.sqrt((x - x2d) ** 2 + (y - y2d) ** 2);
+
+                if (distance < 20) {
+                    this.showSpotDetails(spot, e.clientX, e.clientY);
+                    return;
+                }
+            }
+        }
+
+        this.hideSpotDetails();
+    }
+
+    showSpotDetails(spot, x, y) {
+        const popup = document.getElementById('spotDetailsPopup');
+        if (!popup) return;
+
+        document.getElementById('spotDetailName').textContent = spot.name;
+        document.getElementById('spotDetailPosition').textContent =
+            `X:${spot.x.toFixed(1)} Y:${spot.y.toFixed(1)} Z:${spot.z.toFixed(1)}`;
+
+        const colorDiv = document.getElementById('spotDetailColor');
+        colorDiv.style.background = `rgb(${spot.color[0]}, ${spot.color[1]}, ${spot.color[2]})`;
+
+        document.getElementById('spotDetailIntensity').textContent = `${Math.round(spot.intensity)}%`;
+
+        const device = spot.device;
+        const startCh = device.start_channel || 1;
+        const chCount = device.channels ? device.channels.length : 0;
+        document.getElementById('spotDetailDMX').textContent = `Ch ${startCh}-${startCh + chCount - 1}`;
+
+        popup.style.display = 'block';
+        popup.style.left = (x + 15) + 'px';
+        popup.style.top = (y + 15) + 'px';
+    }
+
+    hideSpotDetails() {
+        const popup = document.getElementById('spotDetailsPopup');
+        if (popup) popup.style.display = 'none';
+    }
+
+    setStageView(view) {
+        this.stageView = view;
+
+        document.querySelectorAll('[data-view]').forEach(btn => {
+            btn.classList.remove('active');
+        });
+        document.querySelector(`[data-view="${view}"]`).classList.add('active');
+    }
+
+    toggleStageBeams() {
+        this.showBeams = document.getElementById('showBeamsCheckbox').checked;
+    }
+
+    toggleStageGrid() {
+        this.showGrid = document.getElementById('showGridCheckbox').checked;
+    }
+
+    toggleStageLabels() {
+        this.showLabels = document.getElementById('showLabelsCheckbox').checked;
+    }
+
+    resetStageCamera() {
+        this.stageCamera = { x: 0, y: -5, z: 10, rotX: -30, rotY: 0 };
+    }
+
+    toggleStageFullscreen() {
+        const container = document.getElementById('stageCanvasContainer');
+        const icon = document.getElementById('fullscreenIcon');
+
+        if (!container.classList.contains('fullscreen')) {
+            container.classList.add('fullscreen');
+            if (icon) icon.textContent = '⛶';
+            this.resizeStageCanvas();
+        } else {
+            container.classList.remove('fullscreen');
+            if (icon) icon.textContent = '⛶';
+            this.resizeStageCanvas();
         }
     }
 }
