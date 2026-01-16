@@ -3538,13 +3538,272 @@ class DMXController {
         if (this.stageDemoMode) {
             demoBtn.classList.add('active');
             liveBtn.classList.remove('active');
+            // Add demo devices to device list
+            this.addDemoDevices();
         } else {
             demoBtn.classList.remove('active');
             liveBtn.classList.add('active');
+            // Remove demo devices from device list
+            this.removeDemoDevices();
         }
 
         // Regenerate spots
         this.updateStageSpots();
+    }
+
+    addDemoDevices() {
+        // Store original devices to restore later
+        if (!this.originalDevices) {
+            this.originalDevices = [...this.devices];
+        }
+
+        // Create demo devices with realistic DMX structure
+        const demoDevices = [
+            {
+                id: 'demo-1',
+                name: 'PAR Front L',
+                device_type: 'spot_rgb',
+                universe: 1,
+                start_channel: 1,
+                values: [0, 255, 0, 0],
+                current_values: { 1: 0, 2: 255, 3: 0, 4: 0 },
+                channels: [
+                    { channel: 1, type: 'dimmer', name: 'Dimmer' },
+                    { channel: 2, type: 'red', name: 'Red' },
+                    { channel: 3, type: 'green', name: 'Green' },
+                    { channel: 4, type: 'blue', name: 'Blue' }
+                ]
+            },
+            {
+                id: 'demo-2',
+                name: 'PAR Front C',
+                device_type: 'spot_rgb',
+                universe: 1,
+                start_channel: 5,
+                values: [0, 0, 255, 0],
+                current_values: { 5: 0, 6: 0, 7: 255, 8: 0 },
+                channels: [
+                    { channel: 5, type: 'dimmer', name: 'Dimmer' },
+                    { channel: 6, type: 'red', name: 'Red' },
+                    { channel: 7, type: 'green', name: 'Green' },
+                    { channel: 8, type: 'blue', name: 'Blue' }
+                ]
+            },
+            {
+                id: 'demo-3',
+                name: 'PAR Front R',
+                device_type: 'spot_rgb',
+                universe: 1,
+                start_channel: 9,
+                values: [0, 0, 0, 255],
+                current_values: { 9: 0, 10: 0, 11: 0, 12: 255 },
+                channels: [
+                    { channel: 9, type: 'dimmer', name: 'Dimmer' },
+                    { channel: 10, type: 'red', name: 'Red' },
+                    { channel: 11, type: 'green', name: 'Green' },
+                    { channel: 12, type: 'blue', name: 'Blue' }
+                ]
+            },
+            {
+                id: 'demo-4',
+                name: 'Moving Head L',
+                device_type: 'spot_rgb',
+                universe: 1,
+                start_channel: 13,
+                values: [0, 255, 255, 0],
+                current_values: { 13: 0, 14: 255, 15: 255, 16: 0 },
+                channels: [
+                    { channel: 13, type: 'dimmer', name: 'Dimmer' },
+                    { channel: 14, type: 'red', name: 'Red' },
+                    { channel: 15, type: 'green', name: 'Green' },
+                    { channel: 16, type: 'blue', name: 'Blue' }
+                ]
+            },
+            {
+                id: 'demo-5',
+                name: 'Moving Head C',
+                device_type: 'spot_rgb',
+                universe: 1,
+                start_channel: 17,
+                values: [0, 255, 0, 255],
+                current_values: { 17: 0, 18: 255, 19: 0, 20: 255 },
+                channels: [
+                    { channel: 17, type: 'dimmer', name: 'Dimmer' },
+                    { channel: 18, type: 'red', name: 'Red' },
+                    { channel: 19, type: 'green', name: 'Green' },
+                    { channel: 20, type: 'blue', name: 'Blue' }
+                ]
+            },
+            {
+                id: 'demo-6',
+                name: 'Moving Head R',
+                device_type: 'spot_rgb',
+                universe: 1,
+                start_channel: 21,
+                values: [0, 0, 255, 255],
+                current_values: { 21: 0, 22: 0, 23: 255, 24: 255 },
+                channels: [
+                    { channel: 21, type: 'dimmer', name: 'Dimmer' },
+                    { channel: 22, type: 'red', name: 'Red' },
+                    { channel: 23, type: 'green', name: 'Green' },
+                    { channel: 24, type: 'blue', name: 'Blue' }
+                ]
+            },
+            {
+                id: 'demo-7',
+                name: 'Wash Back L',
+                device_type: 'spot_rgb',
+                universe: 1,
+                start_channel: 25,
+                values: [0, 255, 128, 0],
+                current_values: { 25: 0, 26: 255, 27: 128, 28: 0 },
+                channels: [
+                    { channel: 25, type: 'dimmer', name: 'Dimmer' },
+                    { channel: 26, type: 'red', name: 'Red' },
+                    { channel: 27, type: 'green', name: 'Green' },
+                    { channel: 28, type: 'blue', name: 'Blue' }
+                ]
+            },
+            {
+                id: 'demo-8',
+                name: 'Wash Back C',
+                device_type: 'spot_rgb',
+                universe: 1,
+                start_channel: 29,
+                values: [0, 128, 255, 128],
+                current_values: { 29: 0, 30: 128, 31: 255, 32: 128 },
+                channels: [
+                    { channel: 29, type: 'dimmer', name: 'Dimmer' },
+                    { channel: 30, type: 'red', name: 'Red' },
+                    { channel: 31, type: 'green', name: 'Green' },
+                    { channel: 32, type: 'blue', name: 'Blue' }
+                ]
+            },
+            {
+                id: 'demo-9',
+                name: 'Wash Back R',
+                device_type: 'spot_rgb',
+                universe: 1,
+                start_channel: 33,
+                values: [0, 128, 128, 255],
+                current_values: { 33: 0, 34: 128, 35: 128, 36: 255 },
+                channels: [
+                    { channel: 33, type: 'dimmer', name: 'Dimmer' },
+                    { channel: 34, type: 'red', name: 'Red' },
+                    { channel: 35, type: 'green', name: 'Green' },
+                    { channel: 36, type: 'blue', name: 'Blue' }
+                ]
+            },
+            {
+                id: 'demo-10',
+                name: 'Side Spot L',
+                device_type: 'spot_rgb',
+                universe: 1,
+                start_channel: 37,
+                values: [0, 255, 200, 100],
+                current_values: { 37: 0, 38: 255, 39: 200, 40: 100 },
+                channels: [
+                    { channel: 37, type: 'dimmer', name: 'Dimmer' },
+                    { channel: 38, type: 'red', name: 'Red' },
+                    { channel: 39, type: 'green', name: 'Green' },
+                    { channel: 40, type: 'blue', name: 'Blue' }
+                ]
+            },
+            {
+                id: 'demo-11',
+                name: 'Side Spot R',
+                device_type: 'spot_rgb',
+                universe: 1,
+                start_channel: 41,
+                values: [0, 100, 200, 255],
+                current_values: { 41: 0, 42: 100, 43: 200, 44: 255 },
+                channels: [
+                    { channel: 41, type: 'dimmer', name: 'Dimmer' },
+                    { channel: 42, type: 'red', name: 'Red' },
+                    { channel: 43, type: 'green', name: 'Green' },
+                    { channel: 44, type: 'blue', name: 'Blue' }
+                ]
+            },
+            {
+                id: 'demo-12',
+                name: 'Truss Front L',
+                device_type: 'spot_rgb',
+                universe: 1,
+                start_channel: 45,
+                values: [0, 255, 100, 200],
+                current_values: { 45: 0, 46: 255, 47: 100, 48: 200 },
+                channels: [
+                    { channel: 45, type: 'dimmer', name: 'Dimmer' },
+                    { channel: 46, type: 'red', name: 'Red' },
+                    { channel: 47, type: 'green', name: 'Green' },
+                    { channel: 48, type: 'blue', name: 'Blue' }
+                ]
+            },
+            {
+                id: 'demo-13',
+                name: 'Truss Front R',
+                device_type: 'spot_rgb',
+                universe: 1,
+                start_channel: 49,
+                values: [0, 200, 100, 255],
+                current_values: { 49: 0, 50: 200, 51: 100, 52: 255 },
+                channels: [
+                    { channel: 49, type: 'dimmer', name: 'Dimmer' },
+                    { channel: 50, type: 'red', name: 'Red' },
+                    { channel: 51, type: 'green', name: 'Green' },
+                    { channel: 52, type: 'blue', name: 'Blue' }
+                ]
+            },
+            {
+                id: 'demo-14',
+                name: 'Truss Back L',
+                device_type: 'spot_rgb',
+                universe: 1,
+                start_channel: 53,
+                values: [0, 100, 255, 200],
+                current_values: { 53: 0, 54: 100, 55: 255, 56: 200 },
+                channels: [
+                    { channel: 53, type: 'dimmer', name: 'Dimmer' },
+                    { channel: 54, type: 'red', name: 'Red' },
+                    { channel: 55, type: 'green', name: 'Green' },
+                    { channel: 56, type: 'blue', name: 'Blue' }
+                ]
+            },
+            {
+                id: 'demo-15',
+                name: 'Truss Back R',
+                device_type: 'spot_rgb',
+                universe: 1,
+                start_channel: 57,
+                values: [0, 200, 255, 100],
+                current_values: { 57: 0, 58: 200, 59: 255, 60: 100 },
+                channels: [
+                    { channel: 57, type: 'dimmer', name: 'Dimmer' },
+                    { channel: 58, type: 'red', name: 'Red' },
+                    { channel: 59, type: 'green', name: 'Green' },
+                    { channel: 60, type: 'blue', name: 'Blue' }
+                ]
+            }
+        ];
+
+        // Add demo devices to the device list
+        this.devices = [...demoDevices];
+
+        // Re-render devices and groups
+        this.renderDevices();
+        this.renderGroups();
+    }
+
+    removeDemoDevices() {
+        // Restore original devices
+        if (this.originalDevices) {
+            this.devices = [...this.originalDevices];
+            this.originalDevices = null;
+        }
+
+        // Re-render devices and groups
+        this.renderDevices();
+        this.renderGroups();
     }
 
     toggleStageBeams() {
@@ -3574,6 +3833,7 @@ class DMXController {
                 if (icon) icon.textContent = '⛶';
                 if (text) text.textContent = 'Vollbild beenden';
                 this.resizeStageCanvas();
+                this.setupFullscreenControls();
             }).catch(err => {
                 console.error('Fullscreen error:', err);
                 // Fallback to CSS fullscreen
@@ -3581,6 +3841,7 @@ class DMXController {
                 if (icon) icon.textContent = '⛶';
                 if (text) text.textContent = 'Vollbild beenden';
                 this.resizeStageCanvas();
+                this.setupFullscreenControls();
             });
         } else {
             // Exit fullscreen
@@ -3589,6 +3850,7 @@ class DMXController {
                     if (icon) icon.textContent = '⛶';
                     if (text) text.textContent = 'Vollbild';
                     this.resizeStageCanvas();
+                    this.cleanupFullscreenControls();
                 });
             } else {
                 // Fallback: remove CSS fullscreen class
@@ -3596,6 +3858,7 @@ class DMXController {
                 if (icon) icon.textContent = '⛶';
                 if (text) text.textContent = 'Vollbild';
                 this.resizeStageCanvas();
+                this.cleanupFullscreenControls();
             }
         }
 
@@ -3606,8 +3869,100 @@ class DMXController {
                 if (text) text.textContent = 'Vollbild';
                 container.classList.remove('fullscreen');
                 this.resizeStageCanvas();
+                this.cleanupFullscreenControls();
             }
         }, { once: true });
+    }
+
+    setupFullscreenControls() {
+        const container = document.getElementById('stageCanvasContainer');
+        const overlay = document.getElementById('fullscreenControlsOverlay');
+
+        if (!container || !overlay) return;
+
+        // Auto-hide timeout
+        let hideTimeout;
+
+        // Show controls function
+        const showControls = () => {
+            overlay.classList.add('visible');
+            container.classList.remove('hide-cursor');
+
+            // Clear existing timeout
+            if (hideTimeout) {
+                clearTimeout(hideTimeout);
+            }
+
+            // Hide after 3 seconds of inactivity
+            hideTimeout = setTimeout(() => {
+                overlay.classList.remove('visible');
+                container.classList.add('hide-cursor');
+            }, 3000);
+        };
+
+        // Hide controls function
+        const hideControls = () => {
+            if (hideTimeout) {
+                clearTimeout(hideTimeout);
+            }
+            overlay.classList.remove('visible');
+            container.classList.add('hide-cursor');
+        };
+
+        // Mouse move handler
+        this.fullscreenMouseMove = (e) => {
+            // Show controls when mouse moves in upper 20% of screen or clicks anywhere
+            if (e.clientY < window.innerHeight * 0.2) {
+                showControls();
+            }
+        };
+
+        // Click/Touch handler for showing controls
+        this.fullscreenClick = (e) => {
+            // Don't show if clicking the exit button itself
+            if (e.target.closest('.btn-fullscreen-exit')) {
+                return;
+            }
+            showControls();
+        };
+
+        // Touch start handler for mobile
+        this.fullscreenTouchStart = (e) => {
+            const touch = e.touches[0];
+            if (touch.clientY < window.innerHeight * 0.2) {
+                showControls();
+            }
+        };
+
+        // Add event listeners
+        container.addEventListener('mousemove', this.fullscreenMouseMove);
+        container.addEventListener('click', this.fullscreenClick);
+        container.addEventListener('touchstart', this.fullscreenTouchStart);
+
+        // Show controls initially
+        showControls();
+    }
+
+    cleanupFullscreenControls() {
+        const container = document.getElementById('stageCanvasContainer');
+        const overlay = document.getElementById('fullscreenControlsOverlay');
+
+        if (!container || !overlay) return;
+
+        // Remove event listeners
+        if (this.fullscreenMouseMove) {
+            container.removeEventListener('mousemove', this.fullscreenMouseMove);
+        }
+        if (this.fullscreenClick) {
+            container.removeEventListener('click', this.fullscreenClick);
+        }
+        if (this.fullscreenTouchStart) {
+            container.removeEventListener('touchstart', this.fullscreenTouchStart);
+        }
+
+        // Hide overlay
+        overlay.classList.remove('visible');
+        container.classList.remove('hide-cursor');
     }
 }
 
