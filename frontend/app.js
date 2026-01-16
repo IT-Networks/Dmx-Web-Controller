@@ -2889,6 +2889,8 @@ class DMXController {
         this.stageAnimationFrame = null;
         this.stageFPS = 60;
         this.stageLastFrame = Date.now();
+        this.stageDemoMode = false; // Start in live mode
+        this.stageDemoTime = 0; // For demo animation
 
         const canvas = document.getElementById('stageCanvas');
         if (!canvas) return;
@@ -2900,7 +2902,7 @@ class DMXController {
         this.stageCtx = canvas.getContext('2d');
         this.stageInitialized = true;
 
-        // Generate spots from devices
+        // Generate spots from devices or demo spots
         this.updateStageSpots();
 
         // Start rendering
@@ -2923,28 +2925,115 @@ class DMXController {
     }
 
     updateStageSpots() {
-        this.stageSpots = this.devices.map((device, index) => {
-            // Calculate position in 3D space (arrange in grid)
-            const gridSize = Math.ceil(Math.sqrt(this.devices.length));
-            const row = Math.floor(index / gridSize);
-            const col = index % gridSize;
-            const spacing = 3;
+        if (this.stageDemoMode) {
+            this.createDemoSpots();
+        } else {
+            this.stageSpots = this.devices.map((device, index) => {
+                // Calculate position in 3D space (arrange in grid)
+                const gridSize = Math.ceil(Math.sqrt(this.devices.length));
+                const row = Math.floor(index / gridSize);
+                const col = index % gridSize;
+                const spacing = 3;
 
-            return {
-                id: device.id,
-                name: device.name,
-                x: (col - gridSize / 2) * spacing,
-                y: 3, // Height above stage
-                z: (row - gridSize / 2) * spacing,
-                color: [255, 255, 255],
-                intensity: 0,
-                dmxValues: device.current_values || {},
-                device: device
-            };
-        });
+                return {
+                    id: device.id,
+                    name: device.name,
+                    x: (col - gridSize / 2) * spacing,
+                    y: 3, // Height above stage
+                    z: (row - gridSize / 2) * spacing,
+                    color: [255, 255, 255],
+                    intensity: 0,
+                    dmxValues: device.current_values || {},
+                    device: device
+                };
+            });
+        }
 
         // Update stats
         this.updateStageStats();
+    }
+
+    createDemoSpots() {
+        // Create a variety of demo spots with different positions and types
+        this.stageSpots = [
+            // Front row - PAR spots
+            { id: 'demo-1', name: 'PAR Front L', x: -6, y: 2.5, z: -8, color: [255, 0, 0], intensity: 80, type: 'par' },
+            { id: 'demo-2', name: 'PAR Front C', x: 0, y: 2.5, z: -8, color: [0, 255, 0], intensity: 90, type: 'par' },
+            { id: 'demo-3', name: 'PAR Front R', x: 6, y: 2.5, z: -8, color: [0, 0, 255], intensity: 85, type: 'par' },
+
+            // Mid row - Moving Heads
+            { id: 'demo-4', name: 'Moving Head L', x: -4, y: 3.5, z: -4, color: [255, 255, 0], intensity: 70, type: 'moving' },
+            { id: 'demo-5', name: 'Moving Head C', x: 0, y: 3.5, z: -4, color: [255, 0, 255], intensity: 95, type: 'moving' },
+            { id: 'demo-6', name: 'Moving Head R', x: 4, y: 3.5, z: -4, color: [0, 255, 255], intensity: 75, type: 'moving' },
+
+            // Back row - Wash lights
+            { id: 'demo-7', name: 'Wash Back L', x: -6, y: 4, z: 0, color: [255, 128, 0], intensity: 60, type: 'wash' },
+            { id: 'demo-8', name: 'Wash Back C', x: 0, y: 4, z: 0, color: [128, 255, 128], intensity: 65, type: 'wash' },
+            { id: 'demo-9', name: 'Wash Back R', x: 6, y: 4, z: 0, color: [128, 128, 255], intensity: 70, type: 'wash' },
+
+            // Side spots
+            { id: 'demo-10', name: 'Side Spot L', x: -8, y: 3, z: -4, color: [255, 200, 100], intensity: 50, type: 'spot' },
+            { id: 'demo-11', name: 'Side Spot R', x: 8, y: 3, z: -4, color: [100, 200, 255], intensity: 55, type: 'spot' },
+
+            // Top truss
+            { id: 'demo-12', name: 'Truss Front L', x: -3, y: 5, z: -6, color: [255, 100, 200], intensity: 40, type: 'truss' },
+            { id: 'demo-13', name: 'Truss Front R', x: 3, y: 5, z: -6, color: [200, 100, 255], intensity: 45, type: 'truss' },
+            { id: 'demo-14', name: 'Truss Back L', x: -3, y: 5, z: -2, color: [100, 255, 200], intensity: 35, type: 'truss' },
+            { id: 'demo-15', name: 'Truss Back R', x: 3, y: 5, z: -2, color: [200, 255, 100], intensity: 38, type: 'truss' },
+        ];
+    }
+
+    updateDemoSpots() {
+        if (!this.stageDemoMode) return;
+
+        // Animate demo spots with varying colors and intensities
+        this.stageDemoTime += 0.016; // ~60fps
+
+        this.stageSpots.forEach((spot, index) => {
+            // Different animation speeds for different spots
+            const speed = 1 + (index % 3) * 0.5;
+            const offset = index * 0.5;
+
+            // Animate intensity with sine wave
+            const intensityBase = 30 + Math.sin(this.stageDemoTime * speed + offset) * 30;
+            spot.intensity = 40 + intensityBase;
+
+            // Animate colors with different frequencies
+            const hue = (this.stageDemoTime * 20 + index * 24) % 360;
+            const rgb = this.hslToRgb(hue / 360, 0.8, 0.5);
+            spot.color = [rgb.r, rgb.g, rgb.b];
+
+            // Occasional flash effect
+            if (Math.sin(this.stageDemoTime * 3 + index) > 0.95) {
+                spot.intensity = 100;
+                spot.color = [255, 255, 255];
+            }
+        });
+    }
+
+    hslToRgb(h, s, l) {
+        let r, g, b;
+
+        if (s === 0) {
+            r = g = b = l;
+        } else {
+            const hue2rgb = (p, q, t) => {
+                if (t < 0) t += 1;
+                if (t > 1) t -= 1;
+                if (t < 1/6) return p + (q - p) * 6 * t;
+                if (t < 1/2) return q;
+                if (t < 2/3) return p + (q - p) * (2/3 - t) * 6;
+                return p;
+            };
+
+            const q = l < 0.5 ? l * (1 + s) : l + s - l * s;
+            const p = 2 * l - q;
+            r = hue2rgb(p, q, h + 1/3);
+            g = hue2rgb(p, q, h);
+            b = hue2rgb(p, q, h - 1/3);
+        }
+
+        return { r: Math.round(r * 255), g: Math.round(g * 255), b: Math.round(b * 255) };
     }
 
     updateStageStats() {
@@ -2971,8 +3060,12 @@ class DMXController {
         this.stageFPS = 1000 / delta;
         this.stageLastFrame = now;
 
-        // Update spot data from devices
-        this.updateStageSpotData();
+        // Update spot data from devices or demo animation
+        if (this.stageDemoMode) {
+            this.updateDemoSpots();
+        } else {
+            this.updateStageSpotData();
+        }
 
         // Clear canvas
         const canvas = document.getElementById('stageCanvas');
@@ -2998,6 +3091,8 @@ class DMXController {
     }
 
     updateStageSpotData() {
+        if (this.stageDemoMode) return; // Skip in demo mode
+
         this.stageSpots.forEach(spot => {
             const device = this.devices.find(d => d.id === spot.id);
             if (!device || !device.current_values) return;
@@ -3432,6 +3527,26 @@ class DMXController {
         document.querySelector(`[data-view="${view}"]`).classList.add('active');
     }
 
+    toggleStageDemoMode() {
+        this.stageDemoMode = !this.stageDemoMode;
+        this.stageDemoTime = 0; // Reset animation time
+
+        // Update button states
+        const demoBtn = document.getElementById('stageDemoModeBtn');
+        const liveBtn = document.getElementById('stageLiveModeBtn');
+
+        if (this.stageDemoMode) {
+            demoBtn.classList.add('active');
+            liveBtn.classList.remove('active');
+        } else {
+            demoBtn.classList.remove('active');
+            liveBtn.classList.add('active');
+        }
+
+        // Regenerate spots
+        this.updateStageSpots();
+    }
+
     toggleStageBeams() {
         this.showBeams = document.getElementById('showBeamsCheckbox').checked;
     }
@@ -3451,16 +3566,48 @@ class DMXController {
     toggleStageFullscreen() {
         const container = document.getElementById('stageCanvasContainer');
         const icon = document.getElementById('fullscreenIcon');
+        const text = document.getElementById('fullscreenText');
 
-        if (!container.classList.contains('fullscreen')) {
-            container.classList.add('fullscreen');
-            if (icon) icon.textContent = '⛶';
-            this.resizeStageCanvas();
+        if (!document.fullscreenElement) {
+            // Enter fullscreen
+            container.requestFullscreen().then(() => {
+                if (icon) icon.textContent = '⛶';
+                if (text) text.textContent = 'Vollbild beenden';
+                this.resizeStageCanvas();
+            }).catch(err => {
+                console.error('Fullscreen error:', err);
+                // Fallback to CSS fullscreen
+                container.classList.add('fullscreen');
+                if (icon) icon.textContent = '⛶';
+                if (text) text.textContent = 'Vollbild beenden';
+                this.resizeStageCanvas();
+            });
         } else {
-            container.classList.remove('fullscreen');
-            if (icon) icon.textContent = '⛶';
-            this.resizeStageCanvas();
+            // Exit fullscreen
+            if (document.exitFullscreen) {
+                document.exitFullscreen().then(() => {
+                    if (icon) icon.textContent = '⛶';
+                    if (text) text.textContent = 'Vollbild';
+                    this.resizeStageCanvas();
+                });
+            } else {
+                // Fallback: remove CSS fullscreen class
+                container.classList.remove('fullscreen');
+                if (icon) icon.textContent = '⛶';
+                if (text) text.textContent = 'Vollbild';
+                this.resizeStageCanvas();
+            }
         }
+
+        // Listen for fullscreen changes (handles ESC key)
+        document.addEventListener('fullscreenchange', () => {
+            if (!document.fullscreenElement) {
+                if (icon) icon.textContent = '⛶';
+                if (text) text.textContent = 'Vollbild';
+                container.classList.remove('fullscreen');
+                this.resizeStageCanvas();
+            }
+        }, { once: true });
     }
 }
 

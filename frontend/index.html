@@ -338,6 +338,18 @@
                         </div>
 
                         <div class="stage-control-group">
+                            <label>Modus:</label>
+                            <div class="button-group">
+                                <button class="btn-option" id="stageDemoModeBtn" data-mode="demo" onclick="app.toggleStageDemoMode()">
+                                    <span>🎪 Demo</span>
+                                </button>
+                                <button class="btn-option active" id="stageLiveModeBtn" data-mode="live" onclick="app.toggleStageDemoMode()">
+                                    <span>🔴 Live</span>
+                                </button>
+                            </div>
+                        </div>
+
+                        <div class="stage-control-group">
                             <label>Optionen:</label>
                             <label class="checkbox-label">
                                 <input type="checkbox" id="showBeamsCheckbox" checked onchange="app.toggleStageBeams()">
@@ -357,8 +369,8 @@
                             <button class="btn btn-secondary btn-sm" onclick="app.resetStageCamera()">
                                 <span>📷 Kamera zurücksetzen</span>
                             </button>
-                            <button class="btn btn-secondary btn-sm" onclick="app.toggleStageFullscreen()">
-                                <span id="fullscreenIcon">⛶</span> <span>Vollbild</span>
+                            <button class="btn btn-secondary btn-sm" id="fullscreenBtn" onclick="app.toggleStageFullscreen()">
+                                <span id="fullscreenIcon">⛶</span> <span id="fullscreenText">Vollbild</span>
                             </button>
                         </div>
                     </div>
