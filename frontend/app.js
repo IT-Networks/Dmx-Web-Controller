@@ -175,10 +175,11 @@ class DMXController {
             'groups': ['Gruppen', 'Steuere mehrere Geräte gleichzeitig'],
             'scenes': ['Szenen', 'Gespeicherte Lichtstimmungen'],
             'effects': ['Effekte', 'Dynamische Lichteffekte'],
-            'sequences': ['Timeline', 'Erstelle Sequenzen aus Szenen und Effekten']
+            'sequences': ['Timeline', 'Erstelle Sequenzen aus Szenen und Effekten'],
+            'settings': ['Einstellungen', 'App-Konfiguration und Audio-Einstellungen']
         };
 
-        const [title, subtitle] = titles[tabName];
+        const [title, subtitle] = titles[tabName] || ['', ''];
         document.getElementById('pageTitle').textContent = title;
         document.getElementById('pageSubtitle').textContent = subtitle;
 
@@ -187,10 +188,11 @@ class DMXController {
             'groups': '<button class="btn btn-primary" onclick="app.showAddGroup()"><svg width="20" height="20" viewBox="0 0 20 20"><path d="M10 3 L10 17 M3 10 L17 10" stroke="currentColor" stroke-width="2"/></svg><span>Gruppe erstellen</span></button>',
             'scenes': '<button class="btn btn-primary" onclick="app.showAddScene()"><svg width="20" height="20" viewBox="0 0 20 20"><path d="M10 3 L10 17 M3 10 L17 10" stroke="currentColor" stroke-width="2"/></svg><span>Szene erstellen</span></button>',
             'effects': '',
-            'sequences': '<button class="btn btn-primary" onclick="app.showAddSequence()"><svg width="20" height="20" viewBox="0 0 20 20"><path d="M10 3 L10 17 M3 10 L17 10" stroke="currentColor" stroke-width="2"/></svg><span>Timeline hinzufügen</span></button>'
+            'sequences': '<button class="btn btn-primary" onclick="app.showAddSequence()"><svg width="20" height="20" viewBox="0 0 20 20"><path d="M10 3 L10 17 M3 10 L17 10" stroke="currentColor" stroke-width="2"/></svg><span>Timeline hinzufügen</span></button>',
+            'settings': ''
         };
 
-        document.getElementById('headerActions').innerHTML = buttons[tabName];
+        document.getElementById('headerActions').innerHTML = buttons[tabName] || '';
     }
     
     // ===== Devices =====
@@ -684,19 +686,43 @@ class DMXController {
         const status = document.getElementById('soundStatus');
         const levelsDisplay = document.getElementById('soundLevelsDisplay');
 
+        // Settings page elements
+        const settingsBtn = document.getElementById('settingsStartSoundBtn');
+        const settingsStatus = document.getElementById('settingsSoundStatus');
+        const settingsLevelsDisplay = document.getElementById('settingsSoundLevelsDisplay');
+
         if (this.audioAnalyzer.isActive) {
             this.audioAnalyzer.stop();
-            btn.textContent = '🎤 Audio aktivieren';
-            status.textContent = 'Inaktiv';
-            status.style.color = 'var(--text-secondary)';
-            levelsDisplay.style.display = 'none';
+            if (btn) btn.textContent = '🎤 Audio aktivieren';
+            if (status) {
+                status.textContent = 'Inaktiv';
+                status.style.color = 'var(--text-secondary)';
+            }
+            if (levelsDisplay) levelsDisplay.style.display = 'none';
+
+            if (settingsBtn) settingsBtn.textContent = '🎤 Audio aktivieren';
+            if (settingsStatus) {
+                settingsStatus.textContent = 'Inaktiv';
+                settingsStatus.style.color = 'var(--text-secondary)';
+            }
+            if (settingsLevelsDisplay) settingsLevelsDisplay.style.display = 'none';
         } else {
             const success = await this.audioAnalyzer.start();
             if (success) {
-                btn.textContent = '🔇 Audio deaktivieren';
-                status.textContent = 'Aktiv';
-                status.style.color = 'var(--success)';
-                levelsDisplay.style.display = 'block';
+                if (btn) btn.textContent = '🔇 Audio deaktivieren';
+                if (status) {
+                    status.textContent = 'Aktiv';
+                    status.style.color = 'var(--success)';
+                }
+                if (levelsDisplay) levelsDisplay.style.display = 'block';
+
+                if (settingsBtn) settingsBtn.textContent = '🔇 Audio deaktivieren';
+                if (settingsStatus) {
+                    settingsStatus.textContent = 'Aktiv';
+                    settingsStatus.style.color = 'var(--success)';
+                }
+                if (settingsLevelsDisplay) settingsLevelsDisplay.style.display = 'block';
+
                 this.showToast('Audio-Analyse aktiviert', 'success');
             } else {
                 this.showToast('Mikrofon-Zugriff verweigert', 'error');
@@ -734,6 +760,7 @@ class DMXController {
     }
 
     updateSoundVisualizer(audioData) {
+        // Update frequency levels in effect panel
         const levelBass = document.getElementById('levelBass');
         const levelMid = document.getElementById('levelMid');
         const levelHigh = document.getElementById('levelHigh');
@@ -741,6 +768,21 @@ class DMXController {
         if (levelBass) levelBass.style.width = (audioData.bass * 100) + '%';
         if (levelMid) levelMid.style.width = (audioData.mid * 100) + '%';
         if (levelHigh) levelHigh.style.width = (audioData.high * 100) + '%';
+
+        // Update frequency levels in settings page
+        const settingsLevelBass = document.getElementById('settingsLevelBass');
+        const settingsLevelMid = document.getElementById('settingsLevelMid');
+        const settingsLevelHigh = document.getElementById('settingsLevelHigh');
+
+        if (settingsLevelBass) settingsLevelBass.style.width = (audioData.bass * 100) + '%';
+        if (settingsLevelMid) settingsLevelMid.style.width = (audioData.mid * 100) + '%';
+        if (settingsLevelHigh) settingsLevelHigh.style.width = (audioData.high * 100) + '%';
+
+        // Update settings page level bar and text
+        const settingsSoundLevelBar = document.getElementById('settingsSoundLevelBar');
+        const settingsSoundLevelText = document.getElementById('settingsSoundLevelText');
+        if (settingsSoundLevelBar) settingsSoundLevelBar.style.width = (audioData.overall * 100) + '%';
+        if (settingsSoundLevelText) settingsSoundLevelText.textContent = Math.round(audioData.overall * 100) + '%';
 
         const canvas = document.getElementById('soundVisualizerCanvas');
         if (!canvas) return;
@@ -763,6 +805,29 @@ class DMXController {
                 const hue = (i / 64) * 180 + 180;
                 ctx.fillStyle = `hsl(${hue}, 70%, 60%)`;
                 ctx.fillRect(i * barWidth, maxHeight - barHeight, barWidth - 1, barHeight);
+            }
+        }
+
+        // Update settings page spectrum analyzer
+        const settingsCanvas = document.getElementById('settingsSpectrumCanvas');
+        if (settingsCanvas && audioData.raw && audioData.raw.length > 0) {
+            const settingsCtx = settingsCanvas.getContext('2d');
+            const settingsWidth = settingsCanvas.width;
+            const settingsHeight = settingsCanvas.height;
+
+            settingsCtx.fillStyle = 'rgba(30, 41, 59, 0.8)';
+            settingsCtx.fillRect(0, 0, settingsWidth, settingsHeight);
+
+            const barWidth = settingsWidth / Math.min(audioData.raw.length, 64);
+            const maxHeight = settingsHeight;
+            const step = Math.floor(audioData.raw.length / 64);
+
+            for (let i = 0; i < 64; i++) {
+                const dataIndex = Math.floor(i * step);
+                const barHeight = (audioData.raw[dataIndex] / 255) * maxHeight;
+                const hue = (i / 64) * 180 + 180;
+                settingsCtx.fillStyle = `hsl(${hue}, 70%, 60%)`;
+                settingsCtx.fillRect(i * barWidth, maxHeight - barHeight, barWidth - 1, barHeight);
             }
         }
     }
