@@ -20,10 +20,47 @@ class DMXController {
     }
 
     init() {
+        this.loadSettings();
         this.connectWebSocket();
         this.loadData();
         this.loadFixtures();
         this.setupKeyboardShortcuts();
+    }
+
+    loadSettings() {
+        // Load audio panel visibility setting
+        const showAudioPanel = localStorage.getItem('showAudioPanel');
+        if (showAudioPanel !== null) {
+            const shouldShow = showAudioPanel === 'true';
+            const checkbox = document.getElementById('showAudioPanelCheckbox');
+            if (checkbox) {
+                checkbox.checked = shouldShow;
+            }
+            this.setAudioPanelVisibility(shouldShow);
+        }
+    }
+
+    toggleAudioPanelVisibility() {
+        const checkbox = document.getElementById('showAudioPanelCheckbox');
+        const shouldShow = checkbox.checked;
+
+        // Save to localStorage
+        localStorage.setItem('showAudioPanel', shouldShow);
+
+        // Apply visibility
+        this.setAudioPanelVisibility(shouldShow);
+
+        this.showToast(
+            shouldShow ? 'Audio Panel aktiviert' : 'Audio Panel deaktiviert',
+            'success'
+        );
+    }
+
+    setAudioPanelVisibility(visible) {
+        const panel = document.getElementById('soundControlPanel');
+        if (panel) {
+            panel.style.display = visible ? 'block' : 'none';
+        }
     }
     
     // ===== WebSocket =====
