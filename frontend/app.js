@@ -1848,12 +1848,22 @@ class DMXController {
 
         this.designerKeyframes.forEach((kf, index) => {
             const item = document.createElement('div');
-            item.className = 'keyframe-list-item' + (index === this.currentKeyframeIndex ? ' active' : '');
+            item.className = 'keyframe-list-item' + (index === this.currentKeyframeIndex ? ' active expanded' : '');
+
+            // Header
+            const header = document.createElement('div');
+            header.className = 'keyframe-item-header';
+
+            // Expand icon
+            const expandIcon = document.createElement('div');
+            expandIcon.className = 'keyframe-expand-icon';
+            expandIcon.textContent = '▶';
+            header.appendChild(expandIcon);
 
             // Marker indicator
             const marker = document.createElement('div');
             marker.className = 'keyframe-marker-indicator';
-            item.appendChild(marker);
+            header.appendChild(marker);
 
             // Info
             const info = document.createElement('div');
@@ -1869,28 +1879,221 @@ class DMXController {
             details.textContent = `Position: ${kf.time.toFixed(1)}%`;
             info.appendChild(details);
 
-            item.appendChild(info);
+            header.appendChild(info);
 
-            // Color preview (if available)
+            // Color preview
             if (this.designerMode === 'spot' && kf.values && kf.values.default) {
                 const colorPreview = document.createElement('div');
                 colorPreview.className = 'keyframe-color-preview';
                 const rgb = kf.values.default;
                 colorPreview.style.background = `rgb(${rgb[0]}, ${rgb[1]}, ${rgb[2]})`;
-                item.appendChild(colorPreview);
+                header.appendChild(colorPreview);
             } else if (kf.pattern && kf.pattern.color) {
                 const colorPreview = document.createElement('div');
                 colorPreview.className = 'keyframe-color-preview';
                 const rgb = kf.pattern.color;
                 colorPreview.style.background = `rgb(${rgb[0]}, ${rgb[1]}, ${rgb[2]})`;
-                item.appendChild(colorPreview);
+                header.appendChild(colorPreview);
             }
 
-            // Click to select
-            item.onclick = () => this.selectKeyframe(index);
+            // Click header to toggle expand
+            header.onclick = (e) => {
+                e.stopPropagation();
+                this.toggleKeyframeExpand(index);
+            };
 
+            item.appendChild(header);
+
+            // Content (editor)
+            const content = document.createElement('div');
+            content.className = 'keyframe-item-content';
+
+            if (this.designerMode === 'spot') {
+                content.innerHTML = this.createSpotKeyframeEditor(kf, index);
+            } else {
+                content.innerHTML = this.createStripKeyframeEditor(kf, index);
+            }
+
+            item.appendChild(content);
             container.appendChild(item);
         });
+
+        // Setup event listeners for all inputs after DOM is ready
+        setTimeout(() => this.setupKeyframeInputListeners(), 0);
+    }
+
+    toggleKeyframeExpand(index) {
+        const items = document.querySelectorAll('.keyframe-list-item');
+        items.forEach((item, i) => {
+            if (i === index) {
+                item.classList.toggle('expanded');
+                if (item.classList.contains('expanded')) {
+                    this.currentKeyframeIndex = index;
+                    this.drawTimeline();
+                }
+            }
+        });
+    }
+
+    createSpotKeyframeEditor(kf, index) {
+        const rgb = kf.values.default || [255, 255, 255];
+        const hexColor = '#' + rgb.map(v => v.toString(16).padStart(2, '0')).join('');
+
+        return `
+            <div class="form-group">
+                <label>Position (0-100%)</label>
+                <input type="range" id="kfPos_${index}" min="0" max="100" value="${kf.time}" class="input-range" data-kf-index="${index}">
+                <span id="kfPosValue_${index}">${kf.time.toFixed(1)}%</span>
+            </div>
+            <div class="form-group">
+                <label>Farbe</label>
+                <div class="color-picker-group">
+                    <input type="color" id="kfColor_${index}" value="${hexColor}" class="color-input" data-kf-index="${index}">
+                    <div class="rgb-inputs">
+                        <input type="number" id="kfRed_${index}" min="0" max="255" value="${rgb[0]}" placeholder="R" class="input input-sm" data-kf-index="${index}">
+                        <input type="number" id="kfGreen_${index}" min="0" max="255" value="${rgb[1]}" placeholder="G" class="input input-sm" data-kf-index="${index}">
+                        <input type="number" id="kfBlue_${index}" min="0" max="255" value="${rgb[2]}" placeholder="B" class="input input-sm" data-kf-index="${index}">
+                    </div>
+                </div>
+            </div>
+            <div class="form-group">
+                <label>Easing</label>
+                <select id="kfEasing_${index}" class="input" data-kf-index="${index}">
+                    <option value="linear" ${kf.easing === 'linear' ? 'selected' : ''}>Linear</option>
+                    <option value="ease-in" ${kf.easing === 'ease-in' ? 'selected' : ''}>Ease In</option>
+                    <option value="ease-out" ${kf.easing === 'ease-out' ? 'selected' : ''}>Ease Out</option>
+                    <option value="ease-in-out" ${kf.easing === 'ease-in-out' ? 'selected' : ''}>Ease In-Out</option>
+                </select>
+            </div>
+            <div class="keyframe-actions-inline">
+                <button class="btn btn-secondary btn-sm" onclick="app.deleteKeyframeByIndex(${index})">
+                    Löschen
+                </button>
+            </div>
+        `;
+    }
+
+    createStripKeyframeEditor(kf, index) {
+        const color = kf.pattern?.color || [255, 255, 255];
+        const hexColor = '#' + color.map(v => v.toString(16).padStart(2, '0')).join('');
+
+        return `
+            <div class="form-group">
+                <label>Position (0-100%)</label>
+                <input type="range" id="kfPos_${index}" min="0" max="100" value="${kf.time}" class="input-range" data-kf-index="${index}">
+                <span id="kfPosValue_${index}">${kf.time.toFixed(1)}%</span>
+            </div>
+            <div class="form-group">
+                <label>Pattern-Typ</label>
+                <select id="kfPattern_${index}" class="input" data-kf-index="${index}">
+                    <option value="solid" ${kf.pattern_type === 'solid' ? 'selected' : ''}>Einfarbig</option>
+                    <option value="gradient" ${kf.pattern_type === 'gradient' ? 'selected' : ''}>Gradient</option>
+                    <option value="wave" ${kf.pattern_type === 'wave' ? 'selected' : ''}>Welle</option>
+                    <option value="chase" ${kf.pattern_type === 'chase' ? 'selected' : ''}>Lauflicht</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label>Farbe</label>
+                <input type="color" id="kfColor_${index}" value="${hexColor}" class="color-input" data-kf-index="${index}">
+            </div>
+            <div class="keyframe-actions-inline">
+                <button class="btn btn-secondary btn-sm" onclick="app.deleteKeyframeByIndex(${index})">
+                    Löschen
+                </button>
+            </div>
+        `;
+    }
+
+    setupKeyframeInputListeners() {
+        // Position sliders
+        document.querySelectorAll('[id^="kfPos_"]').forEach(input => {
+            const index = parseInt(input.dataset.kfIndex);
+            input.oninput = (e) => {
+                const value = parseFloat(e.target.value);
+                document.getElementById(`kfPosValue_${index}`).textContent = value.toFixed(1) + '%';
+                this.designerKeyframes[index].time = value;
+                this.drawTimeline();
+            };
+        });
+
+        // Color pickers
+        document.querySelectorAll('[id^="kfColor_"]').forEach(input => {
+            const index = parseInt(input.dataset.kfIndex);
+            input.onchange = (e) => {
+                const hex = e.target.value;
+                const r = parseInt(hex.substr(1, 2), 16);
+                const g = parseInt(hex.substr(3, 2), 16);
+                const b = parseInt(hex.substr(5, 2), 16);
+
+                if (this.designerMode === 'spot') {
+                    this.designerKeyframes[index].values.default = [r, g, b];
+                    const redInput = document.getElementById(`kfRed_${index}`);
+                    const greenInput = document.getElementById(`kfGreen_${index}`);
+                    const blueInput = document.getElementById(`kfBlue_${index}`);
+                    if (redInput) redInput.value = r;
+                    if (greenInput) greenInput.value = g;
+                    if (blueInput) blueInput.value = b;
+                } else {
+                    if (!this.designerKeyframes[index].pattern) {
+                        this.designerKeyframes[index].pattern = {};
+                    }
+                    this.designerKeyframes[index].pattern.color = [r, g, b];
+                }
+
+                this.updateKeyframeList();
+                this.drawTimeline();
+            };
+        });
+
+        // RGB inputs (spot mode)
+        document.querySelectorAll('[id^="kfRed_"], [id^="kfGreen_"], [id^="kfBlue_"]').forEach(input => {
+            const index = parseInt(input.dataset.kfIndex);
+            input.onchange = () => {
+                const r = parseInt(document.getElementById(`kfRed_${index}`).value) || 0;
+                const g = parseInt(document.getElementById(`kfGreen_${index}`).value) || 0;
+                const b = parseInt(document.getElementById(`kfBlue_${index}`).value) || 0;
+
+                this.designerKeyframes[index].values.default = [r, g, b];
+
+                const hex = '#' + [r, g, b].map(v => v.toString(16).padStart(2, '0')).join('');
+                const colorInput = document.getElementById(`kfColor_${index}`);
+                if (colorInput) colorInput.value = hex;
+
+                this.updateKeyframeList();
+                this.drawTimeline();
+            };
+        });
+
+        // Easing selects
+        document.querySelectorAll('[id^="kfEasing_"]').forEach(select => {
+            const index = parseInt(select.dataset.kfIndex);
+            select.onchange = (e) => {
+                this.designerKeyframes[index].easing = e.target.value;
+            };
+        });
+
+        // Pattern selects (strip mode)
+        document.querySelectorAll('[id^="kfPattern_"]').forEach(select => {
+            const index = parseInt(select.dataset.kfIndex);
+            select.onchange = (e) => {
+                this.designerKeyframes[index].pattern_type = e.target.value;
+                this.updateKeyframeList();
+            };
+        });
+    }
+
+    deleteKeyframeByIndex(index) {
+        if (this.designerKeyframes.length <= 2) {
+            this.showToast('Mindestens 2 Keyframes erforderlich', 'error');
+            return;
+        }
+
+        this.designerKeyframes.splice(index, 1);
+        this.currentKeyframeIndex = Math.max(0, Math.min(index, this.designerKeyframes.length - 1));
+
+        this.updateKeyframeList();
+        this.drawTimeline();
+        this.showToast('Keyframe gelöscht', 'success');
     }
 
     selectKeyframe(index) {
@@ -1903,8 +2106,9 @@ class DMXController {
         // Redraw timeline to highlight selected keyframe
         this.drawTimeline();
 
-        // Show keyframe editor
-        document.getElementById('keyframeEditor').style.display = 'block';
+        // Show keyframe editor (old editor - can be hidden now)
+        const oldEditor = document.getElementById('keyframeEditor');
+        if (oldEditor) oldEditor.style.display = 'none';
 
         if (this.designerMode === 'spot') {
             // Populate spot keyframe editor

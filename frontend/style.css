@@ -1669,31 +1669,84 @@ canvas {
     display: flex;
     flex-direction: column;
     gap: 0.5rem;
-    max-height: 200px;
+    max-height: none;
     overflow-y: auto;
 }
 
 .keyframe-list-item {
     display: flex;
-    align-items: center;
-    gap: 0.75rem;
-    padding: 0.75rem;
+    flex-direction: column;
     background: var(--bg-secondary);
     border: 2px solid transparent;
     border-radius: var(--radius-md);
+    transition: var(--transition);
+    overflow: hidden;
+}
+
+.keyframe-list-item.active {
+    border-color: var(--accent-primary);
+    box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.2);
+}
+
+.keyframe-item-header {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 0.75rem;
     cursor: pointer;
     transition: var(--transition);
 }
 
-.keyframe-list-item:hover {
+.keyframe-item-header:hover {
     background: var(--bg-tertiary);
-    border-color: var(--border-color);
 }
 
-.keyframe-list-item.active {
+.keyframe-list-item.expanded .keyframe-item-header {
     background: var(--bg-tertiary);
-    border-color: var(--accent-primary);
-    box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.2);
+    border-bottom: 1px solid var(--border-color);
+}
+
+.keyframe-item-content {
+    display: none;
+    padding: 1rem;
+    background: var(--bg-primary);
+}
+
+.keyframe-item-content .form-group {
+    margin-bottom: 1rem;
+}
+
+.keyframe-item-content .form-group:last-of-type {
+    margin-bottom: 0;
+}
+
+.keyframe-list-item.expanded .keyframe-item-content {
+    display: block;
+}
+
+.keyframe-expand-icon {
+    width: 20px;
+    height: 20px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--text-muted);
+    font-size: 12px;
+    transition: var(--transition);
+    flex-shrink: 0;
+}
+
+.keyframe-list-item.expanded .keyframe-expand-icon {
+    transform: rotate(90deg);
+    color: var(--accent-primary);
+}
+
+.keyframe-actions-inline {
+    display: flex;
+    gap: 0.5rem;
+    margin-top: 1rem;
+    padding-top: 1rem;
+    border-top: 1px solid var(--border-color);
 }
 
 .keyframe-marker-indicator {
