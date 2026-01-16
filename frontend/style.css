@@ -21,6 +21,9 @@
     --radius-sm: 6px;
     --radius-md: 8px;
     --radius-lg: 12px;
+    --spacing-xs: 0.5rem;
+    --spacing-sm: 1rem;
+    --spacing-md: 1.5rem;
     --transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
@@ -1333,10 +1336,10 @@ canvas {
 }
 
 #timelineCanvas {
-    width: 100%;
-    height: 120px;
+    display: block;
     border-radius: var(--radius-sm);
     cursor: crosshair;
+    max-width: 100%;
 }
 
 .timeline-scrubber {
@@ -1478,4 +1481,393 @@ canvas {
     background: var(--accent-primary);
     border-color: white;
     box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.3);
+}
+
+/* Settings Page */
+.settings-container {
+    max-width: 900px;
+    margin: 0 auto;
+    padding: var(--spacing-md);
+}
+
+.settings-section h2 {
+    margin-bottom: var(--spacing-md);
+    color: var(--text-primary);
+}
+
+.settings-card {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    padding: var(--spacing-md);
+    margin-bottom: var(--spacing-md);
+}
+
+.settings-card h3 {
+    margin-bottom: var(--spacing-md);
+    color: var(--text-primary);
+    font-size: 1.1rem;
+}
+
+.frequency-bars {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: var(--spacing-sm);
+    margin-top: var(--spacing-sm);
+}
+
+.freq-bar {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.freq-bar label {
+    font-size: 0.75rem;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.info-row {
+    display: flex;
+    justify-content: space-between;
+    padding: var(--spacing-sm) 0;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.info-row:last-child {
+    border-bottom: none;
+}
+
+/* Mobile Optimizations */
+@media (max-width: 768px) {
+    /* Collapsible Sound Panel on Mobile */
+    .sound-control-panel {
+        position: fixed;
+        bottom: 0;
+        right: 0;
+        width: 100%;
+        max-width: 100%;
+        z-index: 99;
+        border-radius: var(--radius-md) var(--radius-md) 0 0;
+    }
+
+    .sound-panel-header {
+        cursor: pointer;
+        user-select: none;
+    }
+
+    .sound-panel-body {
+        max-height: 60vh;
+        overflow-y: auto;
+    }
+
+    /* Visual Effect Designer Mobile */
+    .modal-visual-designer {
+        width: 100%;
+        max-width: 100vw;
+        height: 100vh;
+        max-height: 100vh;
+        margin: 0;
+        border-radius: 0;
+    }
+
+    .modal-visual-designer .modal-body {
+        padding: var(--spacing-sm);
+        overflow-y: auto;
+    }
+
+    .designer-timeline-section {
+        margin-bottom: var(--spacing-md);
+    }
+
+    .timeline-container {
+        overflow-x: auto;
+        overflow-y: hidden;
+        touch-action: pan-x;
+    }
+
+    #timelineCanvas {
+        touch-action: none;
+    }
+
+    .timeline-controls {
+        flex-wrap: wrap;
+        gap: var(--spacing-xs);
+    }
+
+    /* Settings on Mobile */
+    .settings-container {
+        padding: var(--spacing-sm);
+    }
+
+    .frequency-bars {
+        grid-template-columns: 1fr;
+    }
+
+    /* Keyframe Editor Mobile */
+    .designer-keyframe-section {
+        margin-top: var(--spacing-md);
+    }
+
+    .form-row {
+        flex-direction: column;
+    }
+
+    .rgb-inputs {
+        width: 100%;
+    }
+}
+
+/* Button text hide on very small screens */
+@media (max-width: 480px) {
+    .btn span {
+        display: none;
+    }
+
+    .btn svg {
+        margin: 0;
+    }
+
+    .header-actions .btn {
+        padding: var(--spacing-xs) var(--spacing-sm);
+    }
+}
+
+/* Responsive Timeline */
+.timeline-container {
+    position: relative;
+    width: 100%;
+    background: #1e293b;
+    border-radius: var(--radius-sm);
+    overflow: hidden;
+    min-height: 120px;
+}
+
+/* Timeline canvas sizing handled by JavaScript */
+
+/* Keyframe List */
+.keyframe-list {
+    margin-top: 1rem;
+    padding: 1rem;
+    background: var(--bg-primary);
+    border-radius: var(--radius-md);
+    border: 1px solid var(--border-color);
+}
+
+.keyframe-list h4 {
+    font-size: 0.875rem;
+    font-weight: 600;
+    color: var(--text-secondary);
+    margin-bottom: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.keyframe-list-items {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    max-height: none;
+    overflow-y: auto;
+}
+
+.keyframe-list-item {
+    display: flex;
+    flex-direction: column;
+    background: var(--bg-secondary);
+    border: 2px solid transparent;
+    border-radius: var(--radius-md);
+    transition: var(--transition);
+    overflow: hidden;
+}
+
+.keyframe-list-item.active {
+    border-color: var(--accent-primary);
+    box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.2);
+}
+
+.keyframe-item-header {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 0.75rem;
+    cursor: pointer;
+    transition: var(--transition);
+}
+
+.keyframe-item-header:hover {
+    background: var(--bg-tertiary);
+}
+
+.keyframe-list-item.expanded .keyframe-item-header {
+    background: var(--bg-tertiary);
+    border-bottom: 1px solid var(--border-color);
+}
+
+.keyframe-item-content {
+    display: none;
+    padding: 1rem;
+    background: var(--bg-primary);
+}
+
+.keyframe-item-content .form-group {
+    margin-bottom: 1rem;
+}
+
+.keyframe-item-content .form-group:last-of-type {
+    margin-bottom: 0;
+}
+
+.checkbox-label {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    cursor: pointer;
+    user-select: none;
+}
+
+.checkbox-label input[type="checkbox"] {
+    width: 18px;
+    height: 18px;
+    cursor: pointer;
+}
+
+.checkbox-label span {
+    font-size: 0.875rem;
+    font-weight: 500;
+}
+
+.strobe-settings {
+    background: var(--bg-secondary);
+    padding: 0.75rem;
+    border-radius: var(--radius-sm);
+    border-left: 3px solid var(--accent-primary);
+}
+
+.keyframe-list-item.expanded .keyframe-item-content {
+    display: block;
+}
+
+.keyframe-expand-icon {
+    width: 20px;
+    height: 20px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--text-muted);
+    font-size: 12px;
+    transition: var(--transition);
+    flex-shrink: 0;
+}
+
+.keyframe-list-item.expanded .keyframe-expand-icon {
+    transform: rotate(90deg);
+    color: var(--accent-primary);
+}
+
+.keyframe-actions-inline {
+    display: flex;
+    gap: 0.5rem;
+    margin-top: 1rem;
+    padding-top: 1rem;
+    border-top: 1px solid var(--border-color);
+}
+
+.keyframe-marker-indicator {
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    background: var(--warning);
+    border: 2px solid var(--bg-primary);
+    flex-shrink: 0;
+}
+
+.keyframe-list-item.active .keyframe-marker-indicator {
+    background: var(--accent-primary);
+    box-shadow: 0 0 8px var(--accent-primary);
+    animation: pulse-indicator 1.5s ease-in-out infinite;
+}
+
+@keyframes pulse-indicator {
+    0%, 100% { transform: scale(1); opacity: 1; }
+    50% { transform: scale(1.2); opacity: 0.8; }
+}
+
+.keyframe-info {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+}
+
+.keyframe-time {
+    font-size: 0.875rem;
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+.keyframe-details {
+    font-size: 0.75rem;
+    color: var(--text-muted);
+}
+
+.keyframe-color-preview {
+    width: 32px;
+    height: 32px;
+    border-radius: var(--radius-sm);
+    border: 2px solid var(--border-color);
+    flex-shrink: 0;
+}
+
+/* Effect Preview Section */
+.effect-preview-section {
+    margin-top: 1.5rem;
+    padding: 1rem;
+    background: var(--bg-primary);
+    border-radius: var(--radius-md);
+    border: 1px solid var(--border-color);
+}
+
+.effect-preview-section h4 {
+    font-size: 1rem;
+    font-weight: 600;
+    color: var(--text-primary);
+    margin-bottom: 1rem;
+}
+
+.effect-preview-container {
+    background: var(--bg-secondary);
+    border-radius: var(--radius-md);
+    padding: 1rem;
+    margin-bottom: 1rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+#effectPreviewAnimCanvas {
+    display: block;
+    width: 100%;
+    max-width: 600px;
+    height: 100px;
+    border-radius: var(--radius-sm);
+    background: #000;
+}
+
+.preview-controls-inline {
+    display: flex;
+    gap: 0.5rem;
+    justify-content: center;
+}
+
+/* Touch-friendly Keyframe Markers on Touch Devices */
+@media (hover: none) and (pointer: coarse) {
+    .keyframe-marker {
+        width: 24px;
+        height: 24px;
+        min-width: 24px;
+        min-height: 24px;
+    }
 }

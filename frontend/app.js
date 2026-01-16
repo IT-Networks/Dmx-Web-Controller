@@ -20,10 +20,47 @@ class DMXController {
     }
 
     init() {
+        this.loadSettings();
         this.connectWebSocket();
         this.loadData();
         this.loadFixtures();
         this.setupKeyboardShortcuts();
+    }
+
+    loadSettings() {
+        // Load audio panel visibility setting
+        const showAudioPanel = localStorage.getItem('showAudioPanel');
+        if (showAudioPanel !== null) {
+            const shouldShow = showAudioPanel === 'true';
+            const checkbox = document.getElementById('showAudioPanelCheckbox');
+            if (checkbox) {
+                checkbox.checked = shouldShow;
+            }
+            this.setAudioPanelVisibility(shouldShow);
+        }
+    }
+
+    toggleAudioPanelVisibility() {
+        const checkbox = document.getElementById('showAudioPanelCheckbox');
+        const shouldShow = checkbox.checked;
+
+        // Save to localStorage
+        localStorage.setItem('showAudioPanel', shouldShow);
+
+        // Apply visibility
+        this.setAudioPanelVisibility(shouldShow);
+
+        this.showToast(
+            shouldShow ? 'Audio Panel aktiviert' : 'Audio Panel deaktiviert',
+            'success'
+        );
+    }
+
+    setAudioPanelVisibility(visible) {
+        const panel = document.getElementById('soundControlPanel');
+        if (panel) {
+            panel.style.display = visible ? 'block' : 'none';
+        }
     }
     
     // ===== WebSocket =====
@@ -175,10 +212,11 @@ class DMXController {
             'groups': ['Gruppen', 'Steuere mehrere Geräte gleichzeitig'],
             'scenes': ['Szenen', 'Gespeicherte Lichtstimmungen'],
             'effects': ['Effekte', 'Dynamische Lichteffekte'],
-            'sequences': ['Timeline', 'Erstelle Sequenzen aus Szenen und Effekten']
+            'sequences': ['Timeline', 'Erstelle Sequenzen aus Szenen und Effekten'],
+            'settings': ['Einstellungen', 'App-Konfiguration und Audio-Einstellungen']
         };
 
-        const [title, subtitle] = titles[tabName];
+        const [title, subtitle] = titles[tabName] || ['', ''];
         document.getElementById('pageTitle').textContent = title;
         document.getElementById('pageSubtitle').textContent = subtitle;
 
@@ -187,10 +225,11 @@ class DMXController {
             'groups': '<button class="btn btn-primary" onclick="app.showAddGroup()"><svg width="20" height="20" viewBox="0 0 20 20"><path d="M10 3 L10 17 M3 10 L17 10" stroke="currentColor" stroke-width="2"/></svg><span>Gruppe erstellen</span></button>',
             'scenes': '<button class="btn btn-primary" onclick="app.showAddScene()"><svg width="20" height="20" viewBox="0 0 20 20"><path d="M10 3 L10 17 M3 10 L17 10" stroke="currentColor" stroke-width="2"/></svg><span>Szene erstellen</span></button>',
             'effects': '',
-            'sequences': '<button class="btn btn-primary" onclick="app.showAddSequence()"><svg width="20" height="20" viewBox="0 0 20 20"><path d="M10 3 L10 17 M3 10 L17 10" stroke="currentColor" stroke-width="2"/></svg><span>Timeline hinzufügen</span></button>'
+            'sequences': '<button class="btn btn-primary" onclick="app.showAddSequence()"><svg width="20" height="20" viewBox="0 0 20 20"><path d="M10 3 L10 17 M3 10 L17 10" stroke="currentColor" stroke-width="2"/></svg><span>Timeline hinzufügen</span></button>',
+            'settings': ''
         };
 
-        document.getElementById('headerActions').innerHTML = buttons[tabName];
+        document.getElementById('headerActions').innerHTML = buttons[tabName] || '';
     }
     
     // ===== Devices =====
@@ -684,19 +723,43 @@ class DMXController {
         const status = document.getElementById('soundStatus');
         const levelsDisplay = document.getElementById('soundLevelsDisplay');
 
+        // Settings page elements
+        const settingsBtn = document.getElementById('settingsStartSoundBtn');
+        const settingsStatus = document.getElementById('settingsSoundStatus');
+        const settingsLevelsDisplay = document.getElementById('settingsSoundLevelsDisplay');
+
         if (this.audioAnalyzer.isActive) {
             this.audioAnalyzer.stop();
-            btn.textContent = '🎤 Audio aktivieren';
-            status.textContent = 'Inaktiv';
-            status.style.color = 'var(--text-secondary)';
-            levelsDisplay.style.display = 'none';
+            if (btn) btn.textContent = '🎤 Audio aktivieren';
+            if (status) {
+                status.textContent = 'Inaktiv';
+                status.style.color = 'var(--text-secondary)';
+            }
+            if (levelsDisplay) levelsDisplay.style.display = 'none';
+
+            if (settingsBtn) settingsBtn.textContent = '🎤 Audio aktivieren';
+            if (settingsStatus) {
+                settingsStatus.textContent = 'Inaktiv';
+                settingsStatus.style.color = 'var(--text-secondary)';
+            }
+            if (settingsLevelsDisplay) settingsLevelsDisplay.style.display = 'none';
         } else {
             const success = await this.audioAnalyzer.start();
             if (success) {
-                btn.textContent = '🔇 Audio deaktivieren';
-                status.textContent = 'Aktiv';
-                status.style.color = 'var(--success)';
-                levelsDisplay.style.display = 'block';
+                if (btn) btn.textContent = '🔇 Audio deaktivieren';
+                if (status) {
+                    status.textContent = 'Aktiv';
+                    status.style.color = 'var(--success)';
+                }
+                if (levelsDisplay) levelsDisplay.style.display = 'block';
+
+                if (settingsBtn) settingsBtn.textContent = '🔇 Audio deaktivieren';
+                if (settingsStatus) {
+                    settingsStatus.textContent = 'Aktiv';
+                    settingsStatus.style.color = 'var(--success)';
+                }
+                if (settingsLevelsDisplay) settingsLevelsDisplay.style.display = 'block';
+
                 this.showToast('Audio-Analyse aktiviert', 'success');
             } else {
                 this.showToast('Mikrofon-Zugriff verweigert', 'error');
@@ -734,6 +797,7 @@ class DMXController {
     }
 
     updateSoundVisualizer(audioData) {
+        // Update frequency levels in effect panel
         const levelBass = document.getElementById('levelBass');
         const levelMid = document.getElementById('levelMid');
         const levelHigh = document.getElementById('levelHigh');
@@ -741,6 +805,21 @@ class DMXController {
         if (levelBass) levelBass.style.width = (audioData.bass * 100) + '%';
         if (levelMid) levelMid.style.width = (audioData.mid * 100) + '%';
         if (levelHigh) levelHigh.style.width = (audioData.high * 100) + '%';
+
+        // Update frequency levels in settings page
+        const settingsLevelBass = document.getElementById('settingsLevelBass');
+        const settingsLevelMid = document.getElementById('settingsLevelMid');
+        const settingsLevelHigh = document.getElementById('settingsLevelHigh');
+
+        if (settingsLevelBass) settingsLevelBass.style.width = (audioData.bass * 100) + '%';
+        if (settingsLevelMid) settingsLevelMid.style.width = (audioData.mid * 100) + '%';
+        if (settingsLevelHigh) settingsLevelHigh.style.width = (audioData.high * 100) + '%';
+
+        // Update settings page level bar and text
+        const settingsSoundLevelBar = document.getElementById('settingsSoundLevelBar');
+        const settingsSoundLevelText = document.getElementById('settingsSoundLevelText');
+        if (settingsSoundLevelBar) settingsSoundLevelBar.style.width = (audioData.overall * 100) + '%';
+        if (settingsSoundLevelText) settingsSoundLevelText.textContent = Math.round(audioData.overall * 100) + '%';
 
         const canvas = document.getElementById('soundVisualizerCanvas');
         if (!canvas) return;
@@ -763,6 +842,29 @@ class DMXController {
                 const hue = (i / 64) * 180 + 180;
                 ctx.fillStyle = `hsl(${hue}, 70%, 60%)`;
                 ctx.fillRect(i * barWidth, maxHeight - barHeight, barWidth - 1, barHeight);
+            }
+        }
+
+        // Update settings page spectrum analyzer
+        const settingsCanvas = document.getElementById('settingsSpectrumCanvas');
+        if (settingsCanvas && audioData.raw && audioData.raw.length > 0) {
+            const settingsCtx = settingsCanvas.getContext('2d');
+            const settingsWidth = settingsCanvas.width;
+            const settingsHeight = settingsCanvas.height;
+
+            settingsCtx.fillStyle = 'rgba(30, 41, 59, 0.8)';
+            settingsCtx.fillRect(0, 0, settingsWidth, settingsHeight);
+
+            const barWidth = settingsWidth / Math.min(audioData.raw.length, 64);
+            const maxHeight = settingsHeight;
+            const step = Math.floor(audioData.raw.length / 64);
+
+            for (let i = 0; i < 64; i++) {
+                const dataIndex = Math.floor(i * step);
+                const barHeight = (audioData.raw[dataIndex] / 255) * maxHeight;
+                const hue = (i / 64) * 180 + 180;
+                settingsCtx.fillStyle = `hsl(${hue}, 70%, 60%)`;
+                settingsCtx.fillRect(i * barWidth, maxHeight - barHeight, barWidth - 1, barHeight);
             }
         }
     }
@@ -1507,23 +1609,30 @@ class DMXController {
             select.appendChild(option);
         });
 
-        // Initialize timeline
-        this.initializeTimeline();
-
-        // Show modal
+        // Show modal first
         document.getElementById('visualDesignerModal').classList.add('active');
 
-        // Add default keyframes
-        this.designerKeyframes = [
-            { time: 0, values: { default: [255, 255, 255] }, easing: 'linear' },
-            { time: 100, values: { default: [255, 0, 0] }, easing: 'linear' }
-        ];
-        this.drawTimeline();
+        // Initialize timeline after modal is visible (so we can measure container width)
+        setTimeout(() => {
+            this.initializeTimeline();
+
+            // Add default keyframes
+            this.designerKeyframes = [
+                { time: 0, values: { default: [255, 255, 255] }, easing: 'linear' },
+                { time: 100, values: { default: [255, 0, 0] }, easing: 'linear' }
+            ];
+            this.updateKeyframeList();
+            this.drawTimeline();
+            this.renderEffectPreview();
+        }, 50);
     }
 
     closeVisualDesigner() {
         if (this.previewPlaying) {
             this.stopPreview();
+        }
+        if (this.effectPreviewPlaying) {
+            this.stopEffectPreview();
         }
         document.getElementById('visualDesignerModal').classList.remove('active');
         this.designerKeyframes = [];
@@ -1568,18 +1677,28 @@ class DMXController {
 
     initializeTimeline() {
         const canvas = document.getElementById('timelineCanvas');
+        if (!canvas) return;
+
         const ctx = canvas.getContext('2d');
 
-        // Make canvas responsive
+        // Make canvas responsive - set the actual canvas resolution
         const container = canvas.parentElement;
-        canvas.width = container.offsetWidth - 32; // Subtract padding
+        const rect = container.getBoundingClientRect();
+        canvas.width = rect.width - 32; // Subtract padding
         canvas.height = 120;
 
-        // Click handler
-        canvas.addEventListener('click', (e) => {
+        // Dragging state
+        let isDragging = false;
+        let draggedKeyframeIndex = -1;
+
+        // Mouse/Touch start
+        const handleStart = (e) => {
+            const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+            const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+
             const rect = canvas.getBoundingClientRect();
-            const x = e.clientX - rect.left;
-            const y = e.clientY - rect.top;
+            const x = clientX - rect.left;
+            const y = clientY - rect.top;
 
             // Check if clicked on keyframe
             for (let i = 0; i < this.designerKeyframes.length; i++) {
@@ -1588,12 +1707,57 @@ class DMXController {
                 const kfY = canvas.height / 2;
 
                 const distance = Math.sqrt((x - kfX) ** 2 + (y - kfY) ** 2);
-                if (distance < 10) {
+                if (distance < 15) {
+                    isDragging = true;
+                    draggedKeyframeIndex = i;
                     this.selectKeyframe(i);
+                    e.preventDefault();
                     return;
                 }
             }
-        });
+        };
+
+        // Mouse/Touch move
+        const handleMove = (e) => {
+            if (!isDragging || draggedKeyframeIndex < 0) return;
+
+            const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+
+            const rect = canvas.getBoundingClientRect();
+            const x = clientX - rect.left;
+
+            // Calculate new time (0-100%)
+            let newTime = (x / canvas.width) * 100;
+            newTime = Math.max(0, Math.min(100, newTime));
+
+            // Update keyframe time
+            this.designerKeyframes[draggedKeyframeIndex].time = newTime;
+
+            // Update list and redraw
+            this.updateKeyframeList();
+            this.drawTimeline();
+            e.preventDefault();
+        };
+
+        // Mouse/Touch end
+        const handleEnd = (e) => {
+            if (isDragging) {
+                isDragging = false;
+                draggedKeyframeIndex = -1;
+                this.updateKeyframeList();
+                e.preventDefault();
+            }
+        };
+
+        // Add event listeners
+        canvas.addEventListener('mousedown', handleStart);
+        canvas.addEventListener('mousemove', handleMove);
+        canvas.addEventListener('mouseup', handleEnd);
+        canvas.addEventListener('mouseleave', handleEnd);
+
+        canvas.addEventListener('touchstart', handleStart);
+        canvas.addEventListener('touchmove', handleMove);
+        canvas.addEventListener('touchend', handleEnd);
 
         this.drawTimeline();
     }
@@ -1659,14 +1823,31 @@ class DMXController {
             const x = (kf.time / 100) * width;
             const y = height / 2;
 
-            ctx.fillStyle = index === this.currentKeyframeIndex ? '#3b82f6' : '#f59e0b';
+            const isSelected = index === this.currentKeyframeIndex;
+
+            // Draw glow for selected keyframe
+            if (isSelected) {
+                ctx.fillStyle = 'rgba(59, 130, 246, 0.3)';
+                ctx.beginPath();
+                ctx.arc(x, y, 14, 0, Math.PI * 2);
+                ctx.fill();
+            }
+
+            // Draw keyframe marker
+            ctx.fillStyle = isSelected ? '#3b82f6' : '#f59e0b';
             ctx.beginPath();
-            ctx.arc(x, y, 6, 0, Math.PI * 2);
+            ctx.arc(x, y, isSelected ? 8 : 6, 0, Math.PI * 2);
             ctx.fill();
 
-            ctx.strokeStyle = '#0f172a';
-            ctx.lineWidth = 2;
+            ctx.strokeStyle = isSelected ? '#ffffff' : '#0f172a';
+            ctx.lineWidth = isSelected ? 3 : 2;
             ctx.stroke();
+
+            // Draw keyframe number above
+            ctx.fillStyle = isSelected ? '#3b82f6' : '#94a3b8';
+            ctx.font = isSelected ? 'bold 11px sans-serif' : '10px sans-serif';
+            ctx.textAlign = 'center';
+            ctx.fillText(`${index + 1}`, x, y - 15);
         });
     }
 
@@ -1694,17 +1875,389 @@ class DMXController {
         }
 
         this.designerKeyframes.push(newKeyframe);
+        this.updateKeyframeList();
         this.drawTimeline();
+        this.renderEffectPreview();
         this.selectKeyframe(this.designerKeyframes.length - 1);
         this.showToast('Keyframe hinzugefügt', 'success');
+    }
+
+    updateKeyframeList() {
+        const container = document.getElementById('keyframeListItems');
+        if (!container) return;
+
+        container.innerHTML = '';
+
+        this.designerKeyframes.forEach((kf, index) => {
+            const item = document.createElement('div');
+            item.className = 'keyframe-list-item' + (index === this.currentKeyframeIndex ? ' active expanded' : '');
+
+            // Header
+            const header = document.createElement('div');
+            header.className = 'keyframe-item-header';
+
+            // Expand icon
+            const expandIcon = document.createElement('div');
+            expandIcon.className = 'keyframe-expand-icon';
+            expandIcon.textContent = '▶';
+            header.appendChild(expandIcon);
+
+            // Marker indicator
+            const marker = document.createElement('div');
+            marker.className = 'keyframe-marker-indicator';
+            header.appendChild(marker);
+
+            // Info
+            const info = document.createElement('div');
+            info.className = 'keyframe-info';
+
+            const time = document.createElement('div');
+            time.className = 'keyframe-time';
+            time.textContent = `Keyframe ${index + 1}`;
+            info.appendChild(time);
+
+            const details = document.createElement('div');
+            details.className = 'keyframe-details';
+            details.textContent = `Position: ${kf.time.toFixed(1)}%`;
+            info.appendChild(details);
+
+            header.appendChild(info);
+
+            // Color preview
+            if (this.designerMode === 'spot' && kf.values && kf.values.default) {
+                const colorPreview = document.createElement('div');
+                colorPreview.className = 'keyframe-color-preview';
+                const rgb = kf.values.default;
+                colorPreview.style.background = `rgb(${rgb[0]}, ${rgb[1]}, ${rgb[2]})`;
+                header.appendChild(colorPreview);
+            } else if (kf.pattern && kf.pattern.color) {
+                const colorPreview = document.createElement('div');
+                colorPreview.className = 'keyframe-color-preview';
+                const rgb = kf.pattern.color;
+                colorPreview.style.background = `rgb(${rgb[0]}, ${rgb[1]}, ${rgb[2]})`;
+                header.appendChild(colorPreview);
+            }
+
+            // Click header to toggle expand
+            header.onclick = (e) => {
+                e.stopPropagation();
+                this.toggleKeyframeExpand(index);
+            };
+
+            item.appendChild(header);
+
+            // Content (editor)
+            const content = document.createElement('div');
+            content.className = 'keyframe-item-content';
+
+            if (this.designerMode === 'spot') {
+                content.innerHTML = this.createSpotKeyframeEditor(kf, index);
+            } else {
+                content.innerHTML = this.createStripKeyframeEditor(kf, index);
+            }
+
+            item.appendChild(content);
+            container.appendChild(item);
+        });
+
+        // Setup event listeners for all inputs after DOM is ready
+        setTimeout(() => this.setupKeyframeInputListeners(), 0);
+    }
+
+    toggleKeyframeExpand(index) {
+        const items = document.querySelectorAll('.keyframe-list-item');
+        items.forEach((item, i) => {
+            if (i === index) {
+                item.classList.toggle('expanded');
+                if (item.classList.contains('expanded')) {
+                    this.currentKeyframeIndex = index;
+                    this.drawTimeline();
+                }
+            }
+        });
+    }
+
+    createSpotKeyframeEditor(kf, index) {
+        const rgb = kf.values.default || [255, 255, 255];
+        const hexColor = '#' + rgb.map(v => v.toString(16).padStart(2, '0')).join('');
+        const intensity = kf.intensity !== undefined ? kf.intensity : 100;
+        const strobe = kf.strobe || { enabled: false, frequency: 5 };
+
+        return `
+            <div class="form-group">
+                <label>Position (0-100%)</label>
+                <input type="range" id="kfPos_${index}" min="0" max="100" value="${kf.time}" class="input-range" data-kf-index="${index}">
+                <span id="kfPosValue_${index}">${kf.time.toFixed(1)}%</span>
+            </div>
+
+            <div class="form-group">
+                <label>💡 Intensität / Helligkeit</label>
+                <input type="range" id="kfIntensity_${index}" min="0" max="100" value="${intensity}" class="input-range" data-kf-index="${index}">
+                <span id="kfIntensityValue_${index}">${intensity}%</span>
+            </div>
+
+            <div class="form-group">
+                <label>Farbe</label>
+                <div class="color-picker-group">
+                    <input type="color" id="kfColor_${index}" value="${hexColor}" class="color-input" data-kf-index="${index}">
+                    <div class="rgb-inputs">
+                        <input type="number" id="kfRed_${index}" min="0" max="255" value="${rgb[0]}" placeholder="R" class="input input-sm" data-kf-index="${index}">
+                        <input type="number" id="kfGreen_${index}" min="0" max="255" value="${rgb[1]}" placeholder="G" class="input input-sm" data-kf-index="${index}">
+                        <input type="number" id="kfBlue_${index}" min="0" max="255" value="${rgb[2]}" placeholder="B" class="input input-sm" data-kf-index="${index}">
+                    </div>
+                </div>
+            </div>
+
+            <div class="form-group">
+                <label class="checkbox-label">
+                    <input type="checkbox" id="kfStrobeEnabled_${index}" ${strobe.enabled ? 'checked' : ''} data-kf-index="${index}">
+                    <span>⚡ Strobe/Flash aktivieren</span>
+                </label>
+            </div>
+
+            <div id="kfStrobeSettings_${index}" class="strobe-settings" style="display: ${strobe.enabled ? 'block' : 'none'}; margin-left: 1.5rem;">
+                <div class="form-group">
+                    <label>Strobe Frequenz</label>
+                    <input type="range" id="kfStrobeFreq_${index}" min="1" max="20" value="${strobe.frequency}" class="input-range" data-kf-index="${index}">
+                    <span id="kfStrobeFreqValue_${index}">${strobe.frequency} Hz</span>
+                </div>
+            </div>
+
+            <div class="form-group">
+                <label>Übergang (Easing)</label>
+                <select id="kfEasing_${index}" class="input" data-kf-index="${index}">
+                    <option value="linear" ${kf.easing === 'linear' ? 'selected' : ''}>Linear</option>
+                    <option value="ease-in" ${kf.easing === 'ease-in' ? 'selected' : ''}>Ease In</option>
+                    <option value="ease-out" ${kf.easing === 'ease-out' ? 'selected' : ''}>Ease Out</option>
+                    <option value="ease-in-out" ${kf.easing === 'ease-in-out' ? 'selected' : ''}>Ease In-Out</option>
+                </select>
+            </div>
+            <div class="keyframe-actions-inline">
+                <button class="btn btn-secondary btn-sm" onclick="app.deleteKeyframeByIndex(${index})">
+                    🗑️ Löschen
+                </button>
+            </div>
+        `;
+    }
+
+    createStripKeyframeEditor(kf, index) {
+        const color = kf.pattern?.color || [255, 255, 255];
+        const hexColor = '#' + color.map(v => v.toString(16).padStart(2, '0')).join('');
+        const intensity = kf.intensity !== undefined ? kf.intensity : 100;
+        const speed = kf.pattern?.speed !== undefined ? kf.pattern.speed : 5;
+
+        return `
+            <div class="form-group">
+                <label>Position (0-100%)</label>
+                <input type="range" id="kfPos_${index}" min="0" max="100" value="${kf.time}" class="input-range" data-kf-index="${index}">
+                <span id="kfPosValue_${index}">${kf.time.toFixed(1)}%</span>
+            </div>
+
+            <div class="form-group">
+                <label>💡 Intensität / Helligkeit</label>
+                <input type="range" id="kfIntensity_${index}" min="0" max="100" value="${intensity}" class="input-range" data-kf-index="${index}">
+                <span id="kfIntensityValue_${index}">${intensity}%</span>
+            </div>
+
+            <div class="form-group">
+                <label>Pattern-Typ</label>
+                <select id="kfPattern_${index}" class="input" data-kf-index="${index}">
+                    <option value="solid" ${kf.pattern_type === 'solid' ? 'selected' : ''}>🎨 Einfarbig</option>
+                    <option value="gradient" ${kf.pattern_type === 'gradient' ? 'selected' : ''}>🌈 Gradient</option>
+                    <option value="rainbow" ${kf.pattern_type === 'rainbow' ? 'selected' : ''}>🌟 Regenbogen</option>
+                    <option value="wave" ${kf.pattern_type === 'wave' ? 'selected' : ''}>〰️ Welle</option>
+                    <option value="chase" ${kf.pattern_type === 'chase' ? 'selected' : ''}>➡️ Lauflicht</option>
+                    <option value="sparkle" ${kf.pattern_type === 'sparkle' ? 'selected' : ''}>✨ Funkeln</option>
+                    <option value="strobe" ${kf.pattern_type === 'strobe' ? 'selected' : ''}>⚡ Stroboskop</option>
+                </select>
+            </div>
+
+            <div class="form-group">
+                <label>Farbe</label>
+                <input type="color" id="kfColor_${index}" value="${hexColor}" class="color-input" data-kf-index="${index}">
+            </div>
+
+            <div class="form-group">
+                <label>Geschwindigkeit / Speed</label>
+                <input type="range" id="kfSpeed_${index}" min="1" max="10" value="${speed}" class="input-range" data-kf-index="${index}">
+                <span id="kfSpeedValue_${index}">${speed}</span>
+            </div>
+
+            <div class="keyframe-actions-inline">
+                <button class="btn btn-secondary btn-sm" onclick="app.deleteKeyframeByIndex(${index})">
+                    🗑️ Löschen
+                </button>
+            </div>
+        `;
+    }
+
+    setupKeyframeInputListeners() {
+        // Position sliders
+        document.querySelectorAll('[id^="kfPos_"]').forEach(input => {
+            const index = parseInt(input.dataset.kfIndex);
+            input.oninput = (e) => {
+                const value = parseFloat(e.target.value);
+                document.getElementById(`kfPosValue_${index}`).textContent = value.toFixed(1) + '%';
+                this.designerKeyframes[index].time = value;
+                this.drawTimeline();
+            };
+        });
+
+        // Color pickers
+        document.querySelectorAll('[id^="kfColor_"]').forEach(input => {
+            const index = parseInt(input.dataset.kfIndex);
+            input.onchange = (e) => {
+                const hex = e.target.value;
+                const r = parseInt(hex.substr(1, 2), 16);
+                const g = parseInt(hex.substr(3, 2), 16);
+                const b = parseInt(hex.substr(5, 2), 16);
+
+                if (this.designerMode === 'spot') {
+                    this.designerKeyframes[index].values.default = [r, g, b];
+                    const redInput = document.getElementById(`kfRed_${index}`);
+                    const greenInput = document.getElementById(`kfGreen_${index}`);
+                    const blueInput = document.getElementById(`kfBlue_${index}`);
+                    if (redInput) redInput.value = r;
+                    if (greenInput) greenInput.value = g;
+                    if (blueInput) blueInput.value = b;
+                } else {
+                    if (!this.designerKeyframes[index].pattern) {
+                        this.designerKeyframes[index].pattern = {};
+                    }
+                    this.designerKeyframes[index].pattern.color = [r, g, b];
+                }
+
+                this.updateKeyframeList();
+                this.drawTimeline();
+                this.renderEffectPreview();
+            };
+        });
+
+        // RGB inputs (spot mode)
+        document.querySelectorAll('[id^="kfRed_"], [id^="kfGreen_"], [id^="kfBlue_"]').forEach(input => {
+            const index = parseInt(input.dataset.kfIndex);
+            input.onchange = () => {
+                const r = parseInt(document.getElementById(`kfRed_${index}`).value) || 0;
+                const g = parseInt(document.getElementById(`kfGreen_${index}`).value) || 0;
+                const b = parseInt(document.getElementById(`kfBlue_${index}`).value) || 0;
+
+                this.designerKeyframes[index].values.default = [r, g, b];
+
+                const hex = '#' + [r, g, b].map(v => v.toString(16).padStart(2, '0')).join('');
+                const colorInput = document.getElementById(`kfColor_${index}`);
+                if (colorInput) colorInput.value = hex;
+
+                this.updateKeyframeList();
+                this.drawTimeline();
+                this.renderEffectPreview();
+            };
+        });
+
+        // Easing selects
+        document.querySelectorAll('[id^="kfEasing_"]').forEach(select => {
+            const index = parseInt(select.dataset.kfIndex);
+            select.onchange = (e) => {
+                this.designerKeyframes[index].easing = e.target.value;
+            };
+        });
+
+        // Pattern selects (strip mode)
+        document.querySelectorAll('[id^="kfPattern_"]').forEach(select => {
+            const index = parseInt(select.dataset.kfIndex);
+            select.onchange = (e) => {
+                this.designerKeyframes[index].pattern_type = e.target.value;
+                this.updateKeyframeList();
+                this.renderEffectPreview();
+            };
+        });
+
+        // Intensity sliders
+        document.querySelectorAll('[id^="kfIntensity_"]').forEach(input => {
+            const index = parseInt(input.dataset.kfIndex);
+            input.oninput = (e) => {
+                const value = parseInt(e.target.value);
+                document.getElementById(`kfIntensityValue_${index}`).textContent = value + '%';
+                this.designerKeyframes[index].intensity = value;
+                this.renderEffectPreview();
+            };
+        });
+
+        // Strobe enable checkboxes
+        document.querySelectorAll('[id^="kfStrobeEnabled_"]').forEach(checkbox => {
+            const index = parseInt(checkbox.dataset.kfIndex);
+            checkbox.onchange = (e) => {
+                const enabled = e.target.checked;
+                if (!this.designerKeyframes[index].strobe) {
+                    this.designerKeyframes[index].strobe = { enabled: false, frequency: 5 };
+                }
+                this.designerKeyframes[index].strobe.enabled = enabled;
+
+                // Show/hide strobe settings
+                const settings = document.getElementById(`kfStrobeSettings_${index}`);
+                if (settings) {
+                    settings.style.display = enabled ? 'block' : 'none';
+                }
+                this.renderEffectPreview();
+            };
+        });
+
+        // Strobe frequency sliders
+        document.querySelectorAll('[id^="kfStrobeFreq_"]').forEach(input => {
+            const index = parseInt(input.dataset.kfIndex);
+            input.oninput = (e) => {
+                const value = parseInt(e.target.value);
+                document.getElementById(`kfStrobeFreqValue_${index}`).textContent = value + ' Hz';
+                if (!this.designerKeyframes[index].strobe) {
+                    this.designerKeyframes[index].strobe = { enabled: true, frequency: 5 };
+                }
+                this.designerKeyframes[index].strobe.frequency = value;
+                this.renderEffectPreview();
+            };
+        });
+
+        // Speed sliders (strip mode)
+        document.querySelectorAll('[id^="kfSpeed_"]').forEach(input => {
+            const index = parseInt(input.dataset.kfIndex);
+            input.oninput = (e) => {
+                const value = parseInt(e.target.value);
+                document.getElementById(`kfSpeedValue_${index}`).textContent = value;
+                if (!this.designerKeyframes[index].pattern) {
+                    this.designerKeyframes[index].pattern = {};
+                }
+                this.designerKeyframes[index].pattern.speed = value;
+                this.renderEffectPreview();
+            };
+        });
+    }
+
+    deleteKeyframeByIndex(index) {
+        if (this.designerKeyframes.length <= 2) {
+            this.showToast('Mindestens 2 Keyframes erforderlich', 'error');
+            return;
+        }
+
+        this.designerKeyframes.splice(index, 1);
+        this.currentKeyframeIndex = Math.max(0, Math.min(index, this.designerKeyframes.length - 1));
+
+        this.updateKeyframeList();
+        this.drawTimeline();
+        this.renderEffectPreview();
+        this.showToast('Keyframe gelöscht', 'success');
     }
 
     selectKeyframe(index) {
         this.currentKeyframeIndex = index;
         const kf = this.designerKeyframes[index];
 
-        // Show keyframe editor
-        document.getElementById('keyframeEditor').style.display = 'block';
+        // Update list highlighting
+        this.updateKeyframeList();
+
+        // Redraw timeline to highlight selected keyframe
+        this.drawTimeline();
+
+        // Show keyframe editor (old editor - can be hidden now)
+        const oldEditor = document.getElementById('keyframeEditor');
+        if (oldEditor) oldEditor.style.display = 'none';
 
         if (this.designerMode === 'spot') {
             // Populate spot keyframe editor
@@ -1899,6 +2452,7 @@ class DMXController {
             }
         }
 
+        this.updateKeyframeList();
         this.drawTimeline();
         this.showToast('Keyframe aktualisiert', 'success');
     }
@@ -1912,9 +2466,17 @@ class DMXController {
         }
 
         this.designerKeyframes.splice(this.currentKeyframeIndex, 1);
-        this.currentKeyframeIndex = -1;
-        document.getElementById('keyframeEditor').style.display = 'none';
+        this.currentKeyframeIndex = Math.max(0, this.currentKeyframeIndex - 1);
+
+        this.updateKeyframeList();
         this.drawTimeline();
+
+        if (this.designerKeyframes.length > 0) {
+            this.selectKeyframe(this.currentKeyframeIndex);
+        } else {
+            document.getElementById('keyframeEditor').style.display = 'none';
+        }
+
         this.showToast('Keyframe gelöscht', 'success');
     }
 
@@ -2037,8 +2599,220 @@ class DMXController {
             }
         }
 
+        this.updateKeyframeList();
         this.drawTimeline();
+        this.renderEffectPreview();
         this.showToast(`Template "${templateName}" geladen`, 'success');
+    }
+
+    playEffectPreview() {
+        if (this.effectPreviewPlaying) {
+            this.stopEffectPreview();
+            return;
+        }
+
+        this.effectPreviewPlaying = true;
+        document.getElementById('previewPlayIcon').textContent = '⏸';
+
+        const duration = parseFloat(document.getElementById('customEffectDuration').value) || 10;
+        const startTime = Date.now();
+
+        const animate = () => {
+            if (!this.effectPreviewPlaying) return;
+
+            const elapsed = (Date.now() - startTime) / 1000;
+            const progress = (elapsed % duration) / duration * 100; // 0-100%
+
+            this.renderEffectPreview(progress);
+
+            this.effectPreviewAnimFrame = requestAnimationFrame(animate);
+        };
+
+        animate();
+    }
+
+    stopEffectPreview() {
+        this.effectPreviewPlaying = false;
+        document.getElementById('previewPlayIcon').textContent = '▶️';
+        if (this.effectPreviewAnimFrame) {
+            cancelAnimationFrame(this.effectPreviewAnimFrame);
+        }
+        this.renderEffectPreview(0);
+    }
+
+    renderEffectPreview(progress = 0) {
+        const canvas = document.getElementById('effectPreviewAnimCanvas');
+        if (!canvas) return;
+
+        const ctx = canvas.getContext('2d');
+        const width = canvas.width;
+        const height = canvas.height;
+
+        // Clear
+        ctx.fillStyle = '#000';
+        ctx.fillRect(0, 0, width, height);
+
+        if (this.designerKeyframes.length === 0) {
+            // No keyframes - show placeholder
+            ctx.fillStyle = '#334155';
+            ctx.font = '14px sans-serif';
+            ctx.textAlign = 'center';
+            ctx.fillText('Füge Keyframes hinzu um eine Vorschau zu sehen', width / 2, height / 2);
+            return;
+        }
+
+        // Get color and intensity at current progress
+        const colorData = this.getColorAtProgress(progress);
+        const color = colorData.color;
+        const intensity = colorData.intensity / 100;
+        const strobe = colorData.strobe;
+
+        // Apply strobe effect
+        let strobeActive = true;
+        if (strobe && strobe.enabled) {
+            const time = Date.now() / 1000;
+            const cycleTime = 1 / strobe.frequency;
+            const cycleProgress = (time % cycleTime) / cycleTime;
+            strobeActive = cycleProgress < 0.5; // 50% duty cycle
+        }
+
+        // Calculate number of lights to show (simulate multiple devices)
+        const numLights = this.designerMode === 'spot' ? 8 : 1;
+        const lightWidth = width / numLights;
+
+        if (this.designerMode === 'spot') {
+            // Spot mode: show individual lights
+            for (let i = 0; i < numLights; i++) {
+                if (!strobeActive) continue;
+
+                const x = i * lightWidth + lightWidth / 2;
+                const radius = Math.min(lightWidth * 0.4, height * 0.4);
+
+                // Apply intensity to color
+                const r = Math.round(color[0] * intensity);
+                const g = Math.round(color[1] * intensity);
+                const b = Math.round(color[2] * intensity);
+
+                // Draw light with glow
+                const gradient = ctx.createRadialGradient(x, height / 2, 0, x, height / 2, radius);
+                gradient.addColorStop(0, `rgba(${r}, ${g}, ${b}, 1)`);
+                gradient.addColorStop(0.5, `rgba(${r}, ${g}, ${b}, 0.6)`);
+                gradient.addColorStop(1, `rgba(${r}, ${g}, ${b}, 0)`);
+
+                ctx.fillStyle = gradient;
+                ctx.beginPath();
+                ctx.arc(x, height / 2, radius, 0, Math.PI * 2);
+                ctx.fill();
+            }
+        } else {
+            // Strip mode: show LED strip
+            const ledCount = 30;
+            const ledWidth = width / ledCount;
+
+            for (let i = 0; i < ledCount; i++) {
+                if (!strobeActive) continue;
+
+                // Apply intensity to color
+                const r = Math.round(color[0] * intensity);
+                const g = Math.round(color[1] * intensity);
+                const b = Math.round(color[2] * intensity);
+
+                ctx.fillStyle = `rgb(${r}, ${g}, ${b})`;
+                ctx.fillRect(i * ledWidth, height * 0.3, ledWidth - 2, height * 0.4);
+            }
+        }
+
+        // Draw progress indicator
+        const progressX = (progress / 100) * width;
+        ctx.strokeStyle = '#3b82f6';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(progressX, 0);
+        ctx.lineTo(progressX, height);
+        ctx.stroke();
+    }
+
+    getColorAtProgress(progress) {
+        if (this.designerKeyframes.length === 0) {
+            return { color: [0, 0, 0], intensity: 100, strobe: null };
+        }
+
+        // Sort keyframes by time
+        const sorted = [...this.designerKeyframes].sort((a, b) => a.time - b.time);
+
+        // Find surrounding keyframes
+        let beforeKf = sorted[0];
+        let afterKf = sorted[sorted.length - 1];
+
+        for (let i = 0; i < sorted.length - 1; i++) {
+            if (sorted[i].time <= progress && sorted[i + 1].time >= progress) {
+                beforeKf = sorted[i];
+                afterKf = sorted[i + 1];
+                break;
+            }
+        }
+
+        // If exactly on a keyframe
+        if (beforeKf.time === progress) {
+            return {
+                color: this.extractColor(beforeKf),
+                intensity: beforeKf.intensity !== undefined ? beforeKf.intensity : 100,
+                strobe: beforeKf.strobe || null
+            };
+        }
+        if (afterKf.time === progress) {
+            return {
+                color: this.extractColor(afterKf),
+                intensity: afterKf.intensity !== undefined ? afterKf.intensity : 100,
+                strobe: afterKf.strobe || null
+            };
+        }
+
+        // Interpolate between keyframes
+        const t = (progress - beforeKf.time) / (afterKf.time - beforeKf.time);
+        const beforeColor = this.extractColor(beforeKf);
+        const afterColor = this.extractColor(afterKf);
+
+        // Apply easing
+        const easedT = this.applyEasing(t, beforeKf.easing || 'linear');
+
+        // Interpolate color
+        const color = [
+            Math.round(beforeColor[0] + (afterColor[0] - beforeColor[0]) * easedT),
+            Math.round(beforeColor[1] + (afterColor[1] - beforeColor[1]) * easedT),
+            Math.round(beforeColor[2] + (afterColor[2] - beforeColor[2]) * easedT)
+        ];
+
+        // Interpolate intensity
+        const beforeIntensity = beforeKf.intensity !== undefined ? beforeKf.intensity : 100;
+        const afterIntensity = afterKf.intensity !== undefined ? afterKf.intensity : 100;
+        const intensity = Math.round(beforeIntensity + (afterIntensity - beforeIntensity) * easedT);
+
+        // Use strobe from before keyframe (strobe is a discrete property)
+        const strobe = beforeKf.strobe || null;
+
+        return { color, intensity, strobe };
+    }
+
+    extractColor(keyframe) {
+        if (this.designerMode === 'spot') {
+            return keyframe.values?.default || [0, 0, 0];
+        } else {
+            return keyframe.pattern?.color || [0, 0, 0];
+        }
+    }
+
+    applyEasing(t, easing) {
+        switch (easing) {
+            case 'ease-in':
+                return t * t;
+            case 'ease-out':
+                return t * (2 - t);
+            case 'ease-in-out':
+                return t < 0.5 ? 2 * t * t : -1 + (4 - 2 * t) * t;
+            default: // linear
+                return t;
+        }
     }
 
     async saveCustomEffect() {
@@ -2097,3 +2871,4 @@ class DMXController {
 }
 
 const app = new DMXController();
+window.app = app;
