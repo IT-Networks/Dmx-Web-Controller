@@ -1583,16 +1583,12 @@ canvas {
     }
 
     .timeline-container {
-        width: 100%;
         overflow-x: auto;
         overflow-y: hidden;
         touch-action: pan-x;
     }
 
     #timelineCanvas {
-        width: 100%;
-        min-width: 100%;
-        display: block;
         touch-action: none;
     }
 
@@ -1622,20 +1618,20 @@ canvas {
     .rgb-inputs {
         width: 100%;
     }
+}
 
-    /* Button text hide on very small screens */
-    @media (max-width: 480px) {
-        .btn span {
-            display: none;
-        }
+/* Button text hide on very small screens */
+@media (max-width: 480px) {
+    .btn span {
+        display: none;
+    }
 
-        .btn svg {
-            margin: 0;
-        }
+    .btn svg {
+        margin: 0;
+    }
 
-        .header-actions .btn {
-            padding: var(--spacing-xs) var(--spacing-sm);
-        }
+    .header-actions .btn {
+        padding: var(--spacing-xs) var(--spacing-sm);
     }
 }
 
@@ -1655,17 +1651,12 @@ canvas {
     cursor: crosshair;
 }
 
-/* Touch-friendly Keyframe Markers */
-.keyframe-marker {
-    min-width: 20px;
-    min-height: 20px;
-    touch-action: none;
-}
-
+/* Touch-friendly Keyframe Markers on Touch Devices */
 @media (hover: none) and (pointer: coarse) {
-    /* Touch devices */
     .keyframe-marker {
         width: 24px;
         height: 24px;
+        min-width: 24px;
+        min-height: 24px;
     }
 }
