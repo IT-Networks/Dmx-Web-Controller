@@ -1572,18 +1572,20 @@ class DMXController {
             select.appendChild(option);
         });
 
-        // Initialize timeline
-        this.initializeTimeline();
-
-        // Show modal
+        // Show modal first
         document.getElementById('visualDesignerModal').classList.add('active');
 
-        // Add default keyframes
-        this.designerKeyframes = [
-            { time: 0, values: { default: [255, 255, 255] }, easing: 'linear' },
-            { time: 100, values: { default: [255, 0, 0] }, easing: 'linear' }
-        ];
-        this.drawTimeline();
+        // Initialize timeline after modal is visible (so we can measure container width)
+        setTimeout(() => {
+            this.initializeTimeline();
+
+            // Add default keyframes
+            this.designerKeyframes = [
+                { time: 0, values: { default: [255, 255, 255] }, easing: 'linear' },
+                { time: 100, values: { default: [255, 0, 0] }, easing: 'linear' }
+            ];
+            this.drawTimeline();
+        }, 50);
     }
 
     closeVisualDesigner() {
@@ -1633,18 +1635,28 @@ class DMXController {
 
     initializeTimeline() {
         const canvas = document.getElementById('timelineCanvas');
+        if (!canvas) return;
+
         const ctx = canvas.getContext('2d');
 
-        // Make canvas responsive
+        // Make canvas responsive - set the actual canvas resolution
         const container = canvas.parentElement;
-        canvas.width = container.offsetWidth - 32; // Subtract padding
+        const rect = container.getBoundingClientRect();
+        canvas.width = rect.width - 32; // Subtract padding
         canvas.height = 120;
 
-        // Click handler
-        canvas.addEventListener('click', (e) => {
+        // Dragging state
+        let isDragging = false;
+        let draggedKeyframeIndex = -1;
+
+        // Mouse/Touch start
+        const handleStart = (e) => {
+            const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+            const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+
             const rect = canvas.getBoundingClientRect();
-            const x = e.clientX - rect.left;
-            const y = e.clientY - rect.top;
+            const x = clientX - rect.left;
+            const y = clientY - rect.top;
 
             // Check if clicked on keyframe
             for (let i = 0; i < this.designerKeyframes.length; i++) {
@@ -1653,12 +1665,55 @@ class DMXController {
                 const kfY = canvas.height / 2;
 
                 const distance = Math.sqrt((x - kfX) ** 2 + (y - kfY) ** 2);
-                if (distance < 10) {
+                if (distance < 15) {
+                    isDragging = true;
+                    draggedKeyframeIndex = i;
                     this.selectKeyframe(i);
+                    e.preventDefault();
                     return;
                 }
             }
-        });
+        };
+
+        // Mouse/Touch move
+        const handleMove = (e) => {
+            if (!isDragging || draggedKeyframeIndex < 0) return;
+
+            const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+
+            const rect = canvas.getBoundingClientRect();
+            const x = clientX - rect.left;
+
+            // Calculate new time (0-100%)
+            let newTime = (x / canvas.width) * 100;
+            newTime = Math.max(0, Math.min(100, newTime));
+
+            // Update keyframe time
+            this.designerKeyframes[draggedKeyframeIndex].time = newTime;
+
+            // Redraw
+            this.drawTimeline();
+            e.preventDefault();
+        };
+
+        // Mouse/Touch end
+        const handleEnd = (e) => {
+            if (isDragging) {
+                isDragging = false;
+                draggedKeyframeIndex = -1;
+                e.preventDefault();
+            }
+        };
+
+        // Add event listeners
+        canvas.addEventListener('mousedown', handleStart);
+        canvas.addEventListener('mousemove', handleMove);
+        canvas.addEventListener('mouseup', handleEnd);
+        canvas.addEventListener('mouseleave', handleEnd);
+
+        canvas.addEventListener('touchstart', handleStart);
+        canvas.addEventListener('touchmove', handleMove);
+        canvas.addEventListener('touchend', handleEnd);
 
         this.drawTimeline();
     }
@@ -2162,3 +2217,4 @@ class DMXController {
 }
 
 const app = new DMXController();
+window.app = app;
