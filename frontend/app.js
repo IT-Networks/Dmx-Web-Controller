@@ -4313,23 +4313,25 @@ class DMXController {
 
         console.log('Updating 3D spots, count:', this.stageSpots.length);
 
-        // Remove old spot meshes
+        // Remove old spot meshes and all children
         this.threeSpotMeshes.forEach(mesh => {
-            this.threeScene.remove(mesh);
+            // Remove light and target
             if (mesh.light) {
+                if (mesh.light.target) this.threeScene.remove(mesh.light.target);
                 this.threeScene.remove(mesh.light);
             }
-            if (mesh.lens) {
-                this.threeScene.remove(mesh.lens);
-            }
+            // Remove group and all children
+            this.threeScene.remove(mesh);
         });
         this.threeSpotMeshes = [];
 
-        // Create new spot meshes
+        // Create new spot meshes with proper rotation
         this.stageSpots.forEach((spot, index) => {
-            console.log(`Creating spot ${index}: ${spot.name} at (${spot.x}, ${spot.y}, ${spot.z})`);
+            // Create group for spot (allows proper rotation)
+            const spotGroup = new THREE.Group();
+            spotGroup.position.set(spot.x, spot.y, spot.z);
 
-            // Spot body (cylinder) - make it more visible
+            // Spot body (cylinder)
             const spotGeometry = new THREE.CylinderGeometry(0.4, 0.5, 1.2, 16);
             const spotMaterial = new THREE.MeshStandardMaterial({
                 color: 0x444444,
@@ -4339,24 +4341,30 @@ class DMXController {
                 emissiveIntensity: 0.2
             });
             const spotMesh = new THREE.Mesh(spotGeometry, spotMaterial);
-            spotMesh.position.set(spot.x, spot.y, spot.z);
             spotMesh.castShadow = true;
             spotMesh.receiveShadow = true;
-            this.threeScene.add(spotMesh);
+            spotGroup.add(spotMesh);
 
-            // Add a small sphere at the front for lens
-            const lensGeometry = new THREE.SphereGeometry(0.2, 16, 16);
+            // Lens at bottom
+            const lensGeometry = new THREE.SphereGeometry(0.25, 16, 16);
             const lensMaterial = new THREE.MeshStandardMaterial({
                 color: 0x111111,
                 metalness: 0.9,
                 roughness: 0.1
             });
             const lens = new THREE.Mesh(lensGeometry, lensMaterial);
-            lens.position.set(spot.x, spot.y - 0.7, spot.z);
-            this.threeScene.add(lens);
-            spotMesh.lens = lens;
+            lens.position.y = -0.7;
+            spotGroup.add(lens);
 
-            // Light source - always create for demo
+            // Apply pan/tilt rotation
+            const pan = (spot.pan || 0) * (Math.PI / 180);
+            const tilt = (spot.tilt || -45) * (Math.PI / 180);
+            spotGroup.rotation.y = pan;
+            spotGroup.rotation.x = tilt;
+
+            this.threeScene.add(spotGroup);
+
+            // SpotLight for directional lighting
             const intensity = spot.intensity / 100;
             if (intensity > 0.05) {
                 const color = new THREE.Color(
@@ -4365,21 +4373,44 @@ class DMXController {
                     spot.color[2] / 255
                 );
 
-                const light = new THREE.PointLight(color, intensity * 3, 15);
-                light.position.set(spot.x, spot.y - 0.8, spot.z);
-                light.castShadow = true;
-                light.shadow.mapSize.width = 512;
-                light.shadow.mapSize.height = 512;
-                this.threeScene.add(light);
+                // Create spotlight
+                const spotLight = new THREE.SpotLight(color, intensity * 5, 20, Math.PI / 6, 0.3, 1);
+                spotLight.position.set(spot.x, spot.y - 0.7, spot.z);
 
-                spotMesh.light = light;
+                // Calculate direction from pan/tilt
+                const direction = new THREE.Vector3(0, -1, 0);
+                direction.applyEuler(new THREE.Euler(tilt, pan, 0, 'YXZ'));
+                const targetPos = spotLight.position.clone().add(direction.multiplyScalar(10));
 
-                // Update lens emissive
+                spotLight.target.position.copy(targetPos);
+                this.threeScene.add(spotLight.target);
+
+                spotLight.castShadow = true;
+                spotLight.shadow.mapSize.width = 1024;
+                spotLight.shadow.mapSize.height = 1024;
+
+                this.threeScene.add(spotLight);
+                spotGroup.light = spotLight;
+
+                // Lens emissive
                 lens.material.emissive = color;
                 lens.material.emissiveIntensity = intensity * 0.8;
+
+                // Light beam cone visualization
+                const coneGeom = new THREE.ConeGeometry(2, 8, 8, 1, true);
+                const coneMat = new THREE.MeshBasicMaterial({
+                    color: color,
+                    transparent: true,
+                    opacity: intensity * 0.15,
+                    side: THREE.DoubleSide
+                });
+                const lightCone = new THREE.Mesh(coneGeom, coneMat);
+                lightCone.position.y = -4.7;
+                lightCone.rotation.x = Math.PI;
+                spotGroup.add(lightCone);
             }
 
-            this.threeSpotMeshes.push(spotMesh);
+            this.threeSpotMeshes.push(spotGroup);
         });
 
         console.log('3D spots created:', this.threeSpotMeshes.length);
