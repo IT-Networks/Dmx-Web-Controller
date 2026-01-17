@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import List, Dict, Optional
 import socket
 import struct
-from threading import Thread
+from threading import Thread, Lock
 import time
 import os
 import logging
@@ -23,6 +23,7 @@ from datetime import datetime
 import ipaddress
 import math
 from contextlib import asynccontextmanager
+from queue import Queue, Empty
 
 # Logging Configuration
 logging.basicConfig(
@@ -114,6 +115,7 @@ current_audio_data: Dict[str, float] = {  # Current audio levels from clients
 # DMX Performance Optimization - Universe-based state management
 # Key: (ip, universe) -> [512 channel values]
 dmx_universe_state: Dict[tuple, List[int]] = {}
+dmx_universe_lock = Lock()  # Thread-safe access to universe state
 last_save_time = time.time()  # For auto-save debouncing
 save_devices_pending = False  # Flag for pending save operations
 SAVE_DEBOUNCE_INTERVAL = 2.0  # seconds
@@ -459,11 +461,11 @@ def save_sequences():
         return False
 
 
-# DMX Senden mit Universe-basierter State-Verwaltung
+# DMX Senden mit Thread-Safe Universe-basierter State-Verwaltung
 def send_device_dmx(device) -> bool:
     """
     Aktualisiert DMX-Universe mit Gerätewerten und sendet das komplette Universe.
-    Jedes Universe behält seinen State, sodass Geräte sich nicht gegenseitig überschreiben.
+    Thread-safe Implementation verhindert Race Conditions bei parallelen Updates.
     """
     try:
         device_ip = device.get('ip')
@@ -478,34 +480,41 @@ def send_device_dmx(device) -> bool:
         # Universe key (ip, universe)
         universe_key = (device_ip, device_universe)
 
-        # Initialize universe state if it doesn't exist
-        if universe_key not in dmx_universe_state:
-            dmx_universe_state[universe_key] = [0] * 512
-            logger.info(f"Initialized DMX universe state for {device_ip} universe {device_universe}")
+        # Thread-safe universe state update
+        with dmx_universe_lock:
+            # Initialize universe state if it doesn't exist
+            if universe_key not in dmx_universe_state:
+                dmx_universe_state[universe_key] = [0] * 512
+                logger.info(f"Initialized DMX universe state for {device_ip} universe {device_universe}")
 
-        # Get current universe state
-        universe_channels = dmx_universe_state[universe_key]
+            # Get current universe state (make a reference, not a copy)
+            universe_channels = dmx_universe_state[universe_key]
 
-        # Check if values actually changed for this device
-        values_changed = False
-        for i, val in enumerate(device_values):
-            ch = start_ch + i
-            if 0 <= ch < 512:
-                new_value = max(0, min(255, int(val)))  # Clamp to 0-255
-                if universe_channels[ch] != new_value:
-                    values_changed = True
-                    universe_channels[ch] = new_value
+            # Check if values actually changed for this device
+            values_changed = False
+            for i, val in enumerate(device_values):
+                ch = start_ch + i
+                if 0 <= ch < 512:
+                    new_value = max(0, min(255, int(val)))  # Clamp to 0-255
+                    if universe_channels[ch] != new_value:
+                        values_changed = True
+                        universe_channels[ch] = new_value
 
-        # Skip send if nothing changed
-        if not values_changed:
-            logger.debug(f"No changes for {device.get('name')}, skipping DMX send")
-            return True
+            # Skip send if nothing changed
+            if not values_changed:
+                logger.debug(f"No changes for {device.get('name')}, skipping DMX send")
+                return True
 
-        # Send the complete universe
-        success = controller.send_dmx(device_ip, device_universe, universe_channels)
+            # Make a copy of the universe for sending (while still locked)
+            channels_to_send = universe_channels.copy()
+
+        # Send the complete universe OUTSIDE the lock (I/O should not be locked)
+        success = controller.send_dmx(device_ip, device_universe, channels_to_send)
 
         if success:
-            logger.debug(f"DMX sent for {device.get('name')} on {device_ip} universe {device_universe}")
+            logger.debug(f"DMX sent for {device.get('name')} on {device_ip} universe {device_universe} channels {start_ch+1}-{start_ch+len(device_values)}")
+        else:
+            logger.warning(f"Failed to send DMX for {device.get('name')}")
 
         return success
 
