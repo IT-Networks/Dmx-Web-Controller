@@ -3404,14 +3404,14 @@ class DMXController {
         });
 
         // Draw spots
-        this.stageSpots.forEach(spot => {
+        this.stageSpots.forEach((spot, index) => {
             const x2d = centerX + spot.x * scale;
             const y2d = centerY + spot.z * scale;
-            const radius = 20;
+            const radius = 15;
             const intensity = spot.intensity / 100;
 
             // Glow
-            if (intensity > 0.1) {
+            if (intensity > 0.1 && this.showBeams) {
                 const gradient = ctx.createRadialGradient(x2d, y2d, 0, x2d, y2d, radius * 3);
                 gradient.addColorStop(0, `rgba(${spot.color[0]}, ${spot.color[1]}, ${spot.color[2]}, ${intensity * 0.6})`);
                 gradient.addColorStop(1, `rgba(${spot.color[0]}, ${spot.color[1]}, ${spot.color[2]}, 0)`);
@@ -3422,7 +3422,7 @@ class DMXController {
                 ctx.fill();
             }
 
-            // Spot
+            // Spot body (always draw)
             ctx.fillStyle = intensity > 0.1 ?
                 `rgb(${Math.round(spot.color[0] * intensity)}, ${Math.round(spot.color[1] * intensity)}, ${Math.round(spot.color[2] * intensity)})` :
                 '#334155';
@@ -3430,6 +3430,7 @@ class DMXController {
             ctx.arc(x2d, y2d, radius, 0, Math.PI * 2);
             ctx.fill();
 
+            // Outline
             ctx.strokeStyle = intensity > 0.5 ? '#fbbf24' : '#64748b';
             ctx.lineWidth = 2;
             ctx.stroke();

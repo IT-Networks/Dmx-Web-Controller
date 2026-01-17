@@ -1022,29 +1022,31 @@
 
     <!-- Truss Manager Modal -->
     <div class="modal" id="trussManagerModal">
-        <div class="modal-content" style="max-width: 1000px;">
+        <div class="modal-content truss-modal-content">
             <div class="modal-header">
                 <h2>🏗️ Traversen-Verwaltung</h2>
                 <button class="btn-close" onclick="app.closeTrussManager()">×</button>
             </div>
             <div class="modal-body">
-                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 2rem;">
+                <div class="truss-manager-grid">
                     <!-- Truss List -->
-                    <div>
-                        <h3>Traversen</h3>
-                        <button class="btn btn-primary btn-sm" onclick="app.showAddTruss()" style="margin-bottom: 1rem;">
-                            + Traverse hinzufügen
-                        </button>
-                        <div id="trussList" style="max-height: 400px; overflow-y: auto;">
+                    <div class="truss-section">
+                        <div class="section-header">
+                            <h3>Traversen</h3>
+                            <button class="btn btn-primary btn-sm" onclick="app.showAddTruss()">
+                                + Hinzufügen
+                            </button>
+                        </div>
+                        <div id="trussList" class="truss-list-container">
                             <!-- Truss items will be rendered here -->
                         </div>
                     </div>
 
                     <!-- Spot Assignment -->
-                    <div>
+                    <div class="truss-section">
                         <h3>Spots zuordnen</h3>
-                        <div id="spotAssignmentArea">
-                            <p style="color: var(--text-secondary);">Wähle eine Traverse aus, um Spots zuzuordnen</p>
+                        <div id="spotAssignmentArea" class="spot-assignment-container">
+                            <p style="color: var(--text-secondary); text-align: center; padding: 2rem;">Wähle eine Traverse aus, um Spots zuzuordnen</p>
                         </div>
                     </div>
                 </div>
