@@ -21,6 +21,11 @@ class DMXController {
         this.serverUrl = this.getServerUrl();
         this.wsUrl = this.getWebSocketUrl();
 
+        // DMX update throttling
+        this.dmxUpdateQueue = new Map(); // deviceId -> {channelIdx, value, timestamp}
+        this.dmxUpdateTimer = null;
+        this.DMX_UPDATE_INTERVAL = 30; // ms between updates (33fps)
+
         // Truss system
         this.trusses = [];
         this.currentTruss = null;
@@ -434,14 +439,46 @@ class DMXController {
     }
     
     updateDeviceValue(deviceId, channelIdx, value) {
-        if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-            this.ws.send(JSON.stringify({
-                type: 'update_device_value',
-                device_id: deviceId,
-                channel_idx: channelIdx,
-                value: parseInt(value)
-            }));
+        // Queue the update instead of sending immediately
+        const key = `${deviceId}-${channelIdx}`;
+        this.dmxUpdateQueue.set(key, {
+            deviceId,
+            channelIdx,
+            value: parseInt(value),
+            timestamp: Date.now()
+        });
+
+        // Start processing queue if not already running
+        if (!this.dmxUpdateTimer) {
+            this.processDMXUpdateQueue();
         }
+    }
+
+    processDMXUpdateQueue() {
+        if (this.dmxUpdateQueue.size === 0) {
+            this.dmxUpdateTimer = null;
+            return;
+        }
+
+        if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+            // Send all queued updates
+            this.dmxUpdateQueue.forEach((update, key) => {
+                this.ws.send(JSON.stringify({
+                    type: 'update_device_value',
+                    device_id: update.deviceId,
+                    channel_idx: update.channelIdx,
+                    value: update.value
+                }));
+            });
+
+            // Clear the queue
+            this.dmxUpdateQueue.clear();
+        }
+
+        // Schedule next batch
+        this.dmxUpdateTimer = setTimeout(() => {
+            this.processDMXUpdateQueue();
+        }, this.DMX_UPDATE_INTERVAL);
     }
     
     renderDevices() {
