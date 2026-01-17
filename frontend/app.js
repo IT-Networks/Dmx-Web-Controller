@@ -1064,16 +1064,34 @@ class DMXController {
     async loadFixtures() {
         try {
             const response = await this.apiCall('/api/fixtures/categories');
+
+            if (!response.ok) {
+                console.error('Failed to load fixtures:', response.status);
+                return;
+            }
+
             const data = await response.json();
-            this.fixtures = data.categories;
+            this.fixtures = data.categories || {};
             this.populateFixtureSelect();
+            console.log('Fixtures loaded:', Object.keys(this.fixtures).length, 'categories');
         } catch (error) {
             console.error('Error loading fixtures:', error);
+            this.showToast('Fixtures konnten nicht geladen werden', 'warning');
         }
     }
 
     populateFixtureSelect() {
         const select = document.getElementById('fixtureSelect');
+        if (!select) {
+            console.error('Fixture select element not found');
+            return;
+        }
+
+        // Clear existing options except the first one
+        while (select.options.length > 1) {
+            select.remove(1);
+        }
+
         const categoryNames = {
             'dimmer': 'Dimmer',
             'rgb': 'RGB',
@@ -1089,7 +1107,10 @@ class DMXController {
             'panel': 'LED Panels'
         };
 
+        let totalFixtures = 0;
         for (const [category, fixtures] of Object.entries(this.fixtures)) {
+            if (!fixtures || fixtures.length === 0) continue;
+
             const optgroup = document.createElement('optgroup');
             optgroup.label = categoryNames[category] || category;
 
@@ -1098,10 +1119,13 @@ class DMXController {
                 option.value = fixture.id;
                 option.textContent = `${fixture.manufacturer} ${fixture.model} (${fixture.channels}CH)`;
                 optgroup.appendChild(option);
+                totalFixtures++;
             });
 
             select.appendChild(optgroup);
         }
+
+        console.log(`Added ${totalFixtures} fixtures to select`);
     }
 
     async selectFixture() {
@@ -5780,6 +5804,11 @@ class DMXController {
                 statusElement.textContent = `Verbunden (${data.devices} Geräte, ${data.scenes} Szenen)`;
                 statusElement.style.color = 'var(--success)';
                 this.showToast('Server-Verbindung erfolgreich!', 'success');
+
+                // Load all data from server after successful connection
+                await this.loadData();
+                await this.loadFixtures();
+
                 return true;
             } else {
                 statusElement.textContent = `Fehler: HTTP ${response.status}`;
