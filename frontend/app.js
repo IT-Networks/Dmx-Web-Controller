@@ -236,22 +236,22 @@ class DMXController {
     async loadData() {
         try {
             const [devicesRes, scenesRes, groupsRes, effectsRes] = await Promise.all([
-                fetch('/api/devices'),
-                fetch('/api/scenes'),
-                fetch('/api/groups'),
-                fetch('/api/effects')
+                this.apiCall('/api/devices'),
+                this.apiCall('/api/scenes'),
+                this.apiCall('/api/groups'),
+                this.apiCall('/api/effects')
             ]);
-            
+
             const devicesData = await devicesRes.json();
             const scenesData = await scenesRes.json();
             const groupsData = await groupsRes.json();
             const effectsData = await effectsRes.json();
-            
+
             this.devices = devicesData.devices;
             this.scenes = scenesData.scenes;
             this.groups = groupsData.groups;
             this.effects = effectsData.effects;
-            
+
             this.renderAll();
         } catch (error) {
             console.error('Error loading data:', error);
@@ -378,7 +378,7 @@ class DMXController {
         }
 
         try {
-            const response = await fetch('/api/devices', {
+            const response = await this.apiCall('/api/devices', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(device)
@@ -425,7 +425,7 @@ class DMXController {
         if (!confirm('Gerät wirklich löschen?')) return;
         
         try {
-            const response = await fetch(`/api/devices/${deviceId}`, {
+            const response = await this.apiCall(`/api/devices/${deviceId}`, {
                 method: 'DELETE'
             });
             
@@ -568,7 +568,7 @@ class DMXController {
         const deviceIds = Array.from(document.querySelectorAll('.device-select-item input:checked')).map(cb => cb.value);
         if (deviceIds.length === 0) { this.showToast('Bitte mindestens ein Gerät auswählen', 'error'); return; }
         try {
-            const response = await fetch('/api/groups', {
+            const response = await this.apiCall('/api/groups', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ name, device_ids: deviceIds })
@@ -580,14 +580,14 @@ class DMXController {
     async deleteGroup(groupId) {
         if (!confirm('Gruppe wirklich löschen?')) return;
         try {
-            await fetch(`/api/groups/${groupId}`, { method: 'DELETE' });
+            await this.apiCall(`/api/groups/${groupId}`, { method: 'DELETE' });
             this.showToast('Gruppe gelöscht', 'success');
         } catch (error) { console.error(error); this.showToast('Fehler', 'error'); }
     }
     
     async updateGroupIntensity(groupId, intensity) {
         try {
-            await fetch(`/api/groups/${groupId}/values`, {
+            await this.apiCall(`/api/groups/${groupId}/values`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ intensity: parseInt(intensity) })
@@ -628,7 +628,7 @@ class DMXController {
         if (!name) { this.showToast('Bitte Szenenname eingeben', 'error'); return; }
         if (this.devices.length === 0) { this.showToast('Keine Geräte vorhanden', 'error'); return; }
         try {
-            const response = await fetch('/api/scenes', {
+            const response = await this.apiCall('/api/scenes', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ name, color: this.selectedSceneColor })
@@ -640,14 +640,14 @@ class DMXController {
     async deleteScene(sceneId) {
         if (!confirm('Szene wirklich löschen?')) return;
         try {
-            await fetch(`/api/scenes/${sceneId}`, { method: 'DELETE' });
+            await this.apiCall(`/api/scenes/${sceneId}`, { method: 'DELETE' });
             this.showToast('Szene gelöscht', 'success');
         } catch (error) { console.error(error); }
     }
     
     async activateScene(sceneId) {
         try {
-            await fetch(`/api/scenes/${sceneId}/activate`, { method: 'POST' });
+            await this.apiCall(`/api/scenes/${sceneId}/activate`, { method: 'POST' });
             this.showToast('Fade zur Szene...', 'success');
         } catch (error) { console.error(error); }
     }
@@ -701,7 +701,7 @@ class DMXController {
         this.currentEffect.target_ids = targetIds;
         this.currentEffect.params = { speed };
         try {
-            const response = await fetch('/api/effects', {
+            const response = await this.apiCall('/api/effects', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(this.currentEffect)
@@ -716,7 +716,7 @@ class DMXController {
         const isActive = effect.active;
         try {
             const endpoint = isActive ? 'stop' : 'start';
-            const response = await fetch(`/api/effects/${effectId}/${endpoint}`, { method: 'POST' });
+            const response = await this.apiCall(`/api/effects/${effectId}/${endpoint}`, { method: 'POST' });
             if (response.ok) {
                 effect.active = !isActive;
                 this.renderEffects();
@@ -728,7 +728,7 @@ class DMXController {
     async deleteEffect(effectId) {
         if (!confirm('Effekt wirklich löschen?')) return;
         try {
-            await fetch(`/api/effects/${effectId}`, { method: 'DELETE' });
+            await this.apiCall(`/api/effects/${effectId}`, { method: 'DELETE' });
             this.showToast('Effekt gelöscht', 'success');
         } catch (error) { console.error(error); }
     }
@@ -780,7 +780,7 @@ class DMXController {
         resultsDiv.innerHTML = '';
 
         try {
-            const response = await fetch('/api/artnet/discover');
+            const response = await this.apiCall('/api/artnet/discover');
             const data = await response.json();
 
             progress.style.display = 'none';
@@ -1063,7 +1063,7 @@ class DMXController {
     // ===== Fixture Library =====
     async loadFixtures() {
         try {
-            const response = await fetch('/api/fixtures/categories');
+            const response = await this.apiCall('/api/fixtures/categories');
             const data = await response.json();
             this.fixtures = data.categories;
             this.populateFixtureSelect();
@@ -1118,7 +1118,7 @@ class DMXController {
         }
 
         try {
-            const response = await fetch(`/api/fixtures/${fixtureId}`);
+            const response = await this.apiCall(`/api/fixtures/${fixtureId}`);
             const data = await response.json();
             const fixture = data.fixture;
 
@@ -1735,7 +1735,7 @@ class DMXController {
         }
 
         try {
-            const response = await fetch('/api/effects', {
+            const response = await this.apiCall('/api/effects', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(this.currentEffectConfig)
@@ -1884,7 +1884,7 @@ class DMXController {
                 ? `/api/sequences/${this.currentSequence.id}`
                 : '/api/sequences';
 
-            const response = await fetch(url, {
+            const response = await this.apiCall(url, {
                 method: method,
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(this.currentSequence)
@@ -1971,7 +1971,7 @@ class DMXController {
 
     async playSequence(sequenceId) {
         try {
-            const response = await fetch(`/api/sequences/${sequenceId}/play`, {
+            const response = await this.apiCall(`/api/sequences/${sequenceId}/play`, {
                 method: 'POST'
             });
 
@@ -1986,7 +1986,7 @@ class DMXController {
 
     async stopSequence(sequenceId) {
         try {
-            const response = await fetch(`/api/sequences/${sequenceId}/stop`, {
+            const response = await this.apiCall(`/api/sequences/${sequenceId}/stop`, {
                 method: 'POST'
             });
 
@@ -2003,7 +2003,7 @@ class DMXController {
         if (!confirm('Timeline wirklich löschen?')) return;
 
         try {
-            const response = await fetch(`/api/sequences/${sequenceId}`, {
+            const response = await this.apiCall(`/api/sequences/${sequenceId}`, {
                 method: 'DELETE'
             });
 
@@ -3270,7 +3270,7 @@ class DMXController {
         };
 
         try {
-            const response = await fetch('/api/effects', {
+            const response = await this.apiCall('/api/effects', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(effect)
