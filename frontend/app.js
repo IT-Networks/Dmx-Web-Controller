@@ -2969,14 +2969,43 @@ class DMXController {
                         z = (row - gridSize / 2) * spacing;
                     }
                 } else {
-                    // Default grid position for unassigned spots
-                    const gridSize = Math.ceil(Math.sqrt(this.devices.length));
-                    const row = Math.floor(index / gridSize);
-                    const col = index % gridSize;
-                    const spacing = 3;
-                    x = (col - gridSize / 2) * spacing;
-                    y = 3;
-                    z = (row - gridSize / 2) * spacing;
+                    // Auto-assign to first available truss
+                    if (this.trusses.length > 0) {
+                        const truss = this.trusses[0];
+
+                        // Find next available position on truss
+                        const assignedCount = Object.values(this.spotAssignments)
+                            .filter(a => a.trussId === truss.id).length;
+                        const position = -truss.length / 2 + (assignedCount + 1) * (truss.length / (this.devices.length + 1));
+
+                        // Create assignment
+                        this.spotAssignments[device.id] = {
+                            trussId: truss.id,
+                            position: position,
+                            pan: 0,
+                            tilt: -45,
+                            targetX: 0,
+                            targetY: 0,
+                            targetZ: 0
+                        };
+
+                        // Calculate position
+                        const radians = (truss.rotation * Math.PI) / 180;
+                        x = truss.x + Math.cos(radians) * position;
+                        z = truss.z + Math.sin(radians) * position;
+                        y = truss.y;
+                        pan = 0;
+                        tilt = -45;
+                    } else {
+                        // Fallback to grid if no trusses exist
+                        const gridSize = Math.ceil(Math.sqrt(this.devices.length));
+                        const row = Math.floor(index / gridSize);
+                        const col = index % gridSize;
+                        const spacing = 3;
+                        x = (col - gridSize / 2) * spacing;
+                        y = 3;
+                        z = (row - gridSize / 2) * spacing;
+                    }
                 }
 
                 return {
@@ -2995,6 +3024,9 @@ class DMXController {
                 };
             });
         }
+
+        // Save assignments if any were created
+        this.saveTrusses();
 
         // Update stats
         this.updateStageStats();
@@ -3400,6 +3432,38 @@ class DMXController {
                 ctx.textAlign = 'center';
                 ctx.textBaseline = 'bottom';
                 ctx.fillText(truss.name, trussX2d, trussZ2d - 10);
+            }
+        });
+
+        // Draw connection lines from spots to trusses
+        this.stageSpots.forEach((spot, index) => {
+            const trussId = spot.trussId || (spot.assignment && spot.assignment.trussId);
+            if (trussId) {
+                const truss = this.trusses.find(t => t.id === trussId);
+                if (truss) {
+                    const spotX2d = centerX + spot.x * scale;
+                    const spotZ2d = centerY + spot.z * scale;
+
+                    // Find closest point on truss to draw connection
+                    const trussX2d = centerX + truss.x * scale;
+                    const trussZ2d = centerY + truss.z * scale;
+
+                    // Draw connection line (cable)
+                    ctx.strokeStyle = 'rgba(100, 116, 139, 0.5)';
+                    ctx.lineWidth = 2;
+                    ctx.setLineDash([3, 3]);
+                    ctx.beginPath();
+                    ctx.moveTo(trussX2d, trussZ2d);
+                    ctx.lineTo(spotX2d, spotZ2d);
+                    ctx.stroke();
+                    ctx.setLineDash([]);
+
+                    // Draw mounting bracket on truss
+                    ctx.fillStyle = '#64748b';
+                    ctx.beginPath();
+                    ctx.arc(trussX2d, trussZ2d, 4, 0, Math.PI * 2);
+                    ctx.fill();
+                }
             }
         });
 
@@ -3943,6 +4007,9 @@ class DMXController {
             // Initialize Three.js if not already done
             if (!this.threeInitialized) {
                 this.initThreeJS();
+            } else {
+                // Update 3D scene with current spots and trusses
+                this.rebuild3DScene();
             }
         } else {
             // Show 2D canvas, hide 3D container
