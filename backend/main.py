@@ -214,7 +214,7 @@ class DeviceCreate(BaseModel):
     channel_count: int = Field(ge=1, le=512)
     device_type: str
     fixture_id: Optional[str] = None
-    channel_layout: Optional[Dict] = None
+    channel_layout: Optional[List[Dict]] = None
 
     @field_validator('ip')
     @classmethod
