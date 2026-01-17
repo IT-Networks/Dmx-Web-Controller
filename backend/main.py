@@ -1426,6 +1426,24 @@ async def root():
     return FileResponse(str(FRONTEND_DIR / "index.html"))
 
 
+@app.get("/style.css")
+async def get_style():
+    """Serve CSS file"""
+    return FileResponse(str(FRONTEND_DIR / "style.css"))
+
+
+@app.get("/app.js")
+async def get_app():
+    """Serve main JavaScript file"""
+    return FileResponse(str(FRONTEND_DIR / "app.js"))
+
+
+@app.get("/audioAnalyzer.js")
+async def get_audio_analyzer():
+    """Serve audio analyzer JavaScript file"""
+    return FileResponse(str(FRONTEND_DIR / "audioAnalyzer.js"))
+
+
 @app.get("/api/devices")
 async def get_devices():
     """Gibt alle Geräte zurück"""
