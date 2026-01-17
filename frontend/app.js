@@ -613,7 +613,121 @@ class DMXController {
             if (btn.dataset.type === type) btn.classList.add('active');
         });
     }
-    
+
+    // ===== Art-Net Discovery =====
+    showArtNetDiscovery() {
+        this.closeModal('addDeviceModal');
+        this.showModal('artnetDiscoveryModal');
+        document.getElementById('discoveredDevices').innerHTML = '';
+        document.getElementById('scanProgress').style.display = 'none';
+        document.getElementById('startScanBtn').style.display = 'inline-flex';
+    }
+
+    closeArtNetDiscovery() {
+        this.closeModal('artnetDiscoveryModal');
+    }
+
+    async startArtNetScan() {
+        const startBtn = document.getElementById('startScanBtn');
+        const progress = document.getElementById('scanProgress');
+        const resultsDiv = document.getElementById('discoveredDevices');
+
+        // Show progress
+        startBtn.style.display = 'none';
+        progress.style.display = 'block';
+        resultsDiv.innerHTML = '';
+
+        try {
+            const response = await fetch('/api/artnet/discover');
+            const data = await response.json();
+
+            progress.style.display = 'none';
+            startBtn.style.display = 'inline-flex';
+
+            if (data.success && data.nodes && data.nodes.length > 0) {
+                this.showToast(`${data.count} Art-Net Geräte gefunden!`, 'success');
+                this.renderDiscoveredDevices(data.nodes);
+            } else {
+                resultsDiv.innerHTML = `
+                    <div class="empty-state">
+                        <svg width="64" height="64" viewBox="0 0 64 64">
+                            <circle cx="32" cy="32" r="28" fill="none" stroke="currentColor" stroke-width="2" opacity="0.3"/>
+                            <path d="M32 20 L32 36 M32 44 L32 48" stroke="currentColor" stroke-width="3" stroke-linecap="round"/>
+                        </svg>
+                        <h3>Keine Geräte gefunden</h3>
+                        <p>Stelle sicher, dass Art-Net-Geräte eingeschaltet und im selben Netzwerk sind</p>
+                    </div>
+                `;
+                this.showToast('Keine Art-Net Geräte gefunden', 'error');
+            }
+        } catch (error) {
+            console.error('Art-Net scan error:', error);
+            progress.style.display = 'none';
+            startBtn.style.display = 'inline-flex';
+            this.showToast('Scan fehlgeschlagen: ' + error.message, 'error');
+        }
+    }
+
+    renderDiscoveredDevices(nodes) {
+        const resultsDiv = document.getElementById('discoveredDevices');
+
+        const html = `
+            <h3 style="margin-bottom: 1rem;">Gefundene Geräte (${nodes.length})</h3>
+            <div style="display: grid; gap: 1rem;">
+                ${nodes.map((node, index) => `
+                    <div class="device-card" style="background: var(--bg-secondary); border: 2px solid var(--border-color); border-radius: var(--radius-md); padding: 1rem;">
+                        <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 0.75rem;">
+                            <div>
+                                <h4 style="margin: 0 0 0.25rem 0; color: var(--text-primary);">${node.short_name}</h4>
+                                <p style="margin: 0; color: var(--text-secondary); font-size: 0.875rem;">${node.long_name}</p>
+                            </div>
+                            <button class="btn btn-primary btn-sm" onclick="app.addDiscoveredDevice(${index})">
+                                + Hinzufügen
+                            </button>
+                        </div>
+                        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 0.5rem; font-size: 0.875rem;">
+                            <div>
+                                <span style="color: var(--text-secondary);">IP:</span>
+                                <strong style="color: var(--text-primary);">${node.source_ip}</strong>
+                            </div>
+                            <div>
+                                <span style="color: var(--text-secondary);">Port:</span>
+                                <strong style="color: var(--text-primary);">${node.port}</strong>
+                            </div>
+                            <div>
+                                <span style="color: var(--text-secondary);">Ports:</span>
+                                <strong style="color: var(--text-primary);">${node.num_ports}</strong>
+                            </div>
+                        </div>
+                    </div>
+                `).join('')}
+            </div>
+        `;
+
+        resultsDiv.innerHTML = html;
+        // Store nodes for later use
+        this.discoveredNodes = nodes;
+    }
+
+    addDiscoveredDevice(index) {
+        const node = this.discoveredNodes[index];
+        if (!node) return;
+
+        // Close discovery modal
+        this.closeArtNetDiscovery();
+
+        // Open add device modal with pre-filled data
+        this.showAddDevice();
+
+        // Fill in the form
+        document.getElementById('deviceName').value = node.short_name;
+        document.getElementById('deviceIp').value = node.source_ip;
+        document.getElementById('deviceUniverse').value = '0';
+        document.getElementById('deviceChannel').value = '1';
+
+        this.showToast('Gerätedaten übernommen - bitte Konfiguration prüfen', 'success');
+    }
+
     selectSceneColor(color) {
         this.selectedSceneColor = color;
         document.querySelectorAll('.color-btn').forEach(btn => {

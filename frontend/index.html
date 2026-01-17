@@ -479,6 +479,13 @@
                 <button class="modal-close" onclick="app.closeModal('addDeviceModal')">×</button>
             </div>
             <div class="modal-body">
+                <div class="info-message" style="background: rgba(59, 130, 246, 0.1); border-color: var(--accent-primary); margin-bottom: 1rem;">
+                    <strong>💡 Tipp:</strong> Nutze die
+                    <button class="btn btn-secondary btn-sm" onclick="app.showArtNetDiscovery()" style="display: inline-flex; padding: 0.25rem 0.75rem; margin: 0 0.25rem;">
+                        🔍 Art-Net Geräte scannen
+                    </button>
+                    Funktion zum automatischen Finden von Geräten
+                </div>
                 <div class="form-group">
                     <label>Fixture Library</label>
                     <select id="fixtureSelect" class="input" onchange="app.selectFixture()">
@@ -520,6 +527,45 @@
             <div class="modal-footer">
                 <button class="btn btn-secondary" onclick="app.closeModal('addDeviceModal')">Abbrechen</button>
                 <button class="btn btn-primary" onclick="app.addDevice()">Hinzufügen</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal: Art-Net Geräte scannen -->
+    <div class="modal" id="artnetDiscoveryModal">
+        <div class="modal-backdrop" onclick="app.closeArtNetDiscovery()"></div>
+        <div class="modal-dialog" style="max-width: 800px;">
+            <div class="modal-header">
+                <h2>🔍 Art-Net Geräte scannen</h2>
+                <button class="modal-close" onclick="app.closeArtNetDiscovery()">×</button>
+            </div>
+            <div class="modal-body">
+                <div class="info-message">
+                    <strong>ℹ️ Info:</strong> Das Netzwerk wird nach Art-Net-Geräten durchsucht.
+                    Stelle sicher, dass die Geräte eingeschaltet und im selben Netzwerk sind.
+                </div>
+
+                <div style="text-align: center; margin: 1.5rem 0;">
+                    <button class="btn btn-primary" id="startScanBtn" onclick="app.startArtNetScan()">
+                        <svg width="20" height="20" viewBox="0 0 20 20" style="margin-right: 0.5rem;">
+                            <circle cx="10" cy="10" r="8" fill="none" stroke="currentColor" stroke-width="2"/>
+                            <path d="M10 6 L10 10 L14 10" stroke="currentColor" stroke-width="2" fill="none"/>
+                        </svg>
+                        Scan starten
+                    </button>
+                </div>
+
+                <div id="scanProgress" style="display: none; text-align: center; margin: 1.5rem 0;">
+                    <div class="spinner" style="margin: 0 auto 1rem;"></div>
+                    <p style="color: var(--text-secondary);">Scanne Netzwerk nach Art-Net-Geräten...</p>
+                </div>
+
+                <div id="discoveredDevices" style="margin-top: 1.5rem;">
+                    <!-- Discovered devices will be rendered here -->
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="app.closeArtNetDiscovery()">Schließen</button>
             </div>
         </div>
     </div>
