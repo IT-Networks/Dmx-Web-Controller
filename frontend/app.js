@@ -17,6 +17,10 @@ class DMXController {
         this.currentEffect = null;
         this.reconnectInterval = null;
 
+        // Server configuration
+        this.serverUrl = this.getServerUrl();
+        this.wsUrl = this.getWebSocketUrl();
+
         // Truss system
         this.trusses = [];
         this.currentTruss = null;
@@ -35,6 +39,41 @@ class DMXController {
         this.setupKeyboardShortcuts();
     }
 
+    getServerUrl() {
+        // Check if custom server IP is configured
+        const customServerIp = localStorage.getItem('dmx_server_ip');
+        if (customServerIp) {
+            return `http://${customServerIp}:8000`;
+        }
+
+        // Auto-detect: use current hostname if not localhost
+        if (window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1') {
+            return `http://${window.location.hostname}:8000`;
+        }
+
+        // Default to localhost
+        return 'http://localhost:8000';
+    }
+
+    getWebSocketUrl() {
+        const serverUrl = this.serverUrl;
+        const wsProtocol = serverUrl.startsWith('https') ? 'wss' : 'ws';
+        const host = serverUrl.replace(/^https?:\/\//, '');
+        return `${wsProtocol}://${host}/ws`;
+    }
+
+    updateServerUrls() {
+        this.serverUrl = this.getServerUrl();
+        this.wsUrl = this.getWebSocketUrl();
+
+        // Update display
+        const currentIpElement = document.getElementById('currentServerIp');
+        if (currentIpElement) {
+            const customIp = localStorage.getItem('dmx_server_ip');
+            currentIpElement.textContent = customIp || 'Auto (localhost)';
+        }
+    }
+
     loadSettings() {
         // Load audio panel visibility setting
         const showAudioPanel = localStorage.getItem('showAudioPanel');
@@ -46,6 +85,15 @@ class DMXController {
             }
             this.setAudioPanelVisibility(shouldShow);
         }
+
+        // Load server IP setting
+        const serverIp = localStorage.getItem('dmx_server_ip');
+        const serverIpInput = document.getElementById('serverIpInput');
+        if (serverIpInput && serverIp) {
+            serverIpInput.value = serverIp;
+        }
+
+        this.updateServerUrls();
     }
 
     toggleAudioPanelVisibility() {
@@ -71,40 +119,58 @@ class DMXController {
         }
     }
     
+    // ===== API Helper =====
+    async apiCall(endpoint, options = {}) {
+        const url = `${this.serverUrl}${endpoint}`;
+        try {
+            const response = await fetch(url, options);
+            return response;
+        } catch (error) {
+            console.error(`API call failed to ${url}:`, error);
+            throw error;
+        }
+    }
+
     // ===== WebSocket =====
     connectWebSocket() {
-        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-        const wsUrl = `${protocol}//${window.location.host}/ws`;
-        
+        // Close existing connection if any
+        if (this.ws) {
+            this.ws.close();
+        }
+
+        const wsUrl = this.wsUrl;
+        console.log('Connecting to WebSocket:', wsUrl);
+
         this.ws = new WebSocket(wsUrl);
-        
+
         this.ws.onopen = () => {
-            console.log('WebSocket connected');
+            console.log('WebSocket connected to', wsUrl);
             this.updateConnectionStatus(true);
             if (this.reconnectInterval) {
                 clearInterval(this.reconnectInterval);
                 this.reconnectInterval = null;
             }
         };
-        
+
         this.ws.onmessage = (event) => {
             const data = JSON.parse(event.data);
             this.handleWebSocketMessage(data);
         };
-        
+
         this.ws.onclose = () => {
             console.log('WebSocket disconnected');
             this.updateConnectionStatus(false);
-            
+
             if (!this.reconnectInterval) {
                 this.reconnectInterval = setInterval(() => {
                     this.connectWebSocket();
                 }, 3000);
             }
         };
-        
+
         this.ws.onerror = (error) => {
             console.error('WebSocket error:', error);
+            this.updateConnectionStatus(false);
         };
     }
     
@@ -5640,6 +5706,195 @@ class DMXController {
             this.threeScene.add(trussMesh);
             this.threeTrussMeshes.push(trussMesh);
         });
+    }
+
+    // ===== Server Connection Management =====
+    async connectToServer() {
+        const serverIp = document.getElementById('serverIpInput').value.trim();
+
+        if (!serverIp) {
+            this.showToast('Bitte Server-IP eingeben', 'error');
+            return;
+        }
+
+        // Validate IP format (simple check)
+        const ipPattern = /^(\d{1,3}\.){3}\d{1,3}$/;
+        if (!ipPattern.test(serverIp)) {
+            this.showToast('Ungültige IP-Adresse', 'error');
+            return;
+        }
+
+        // Save to localStorage
+        localStorage.setItem('dmx_server_ip', serverIp);
+
+        // Update URLs
+        this.updateServerUrls();
+
+        // Reconnect WebSocket
+        this.connectWebSocket();
+
+        this.showToast('Verbinde mit Server...', 'info');
+
+        // Test connection
+        setTimeout(() => this.testServerConnection(), 1000);
+    }
+
+    async testServerConnection() {
+        const statusElement = document.getElementById('connectionStatusText');
+
+        try {
+            const response = await this.apiCall('/api/health');
+
+            if (response.ok) {
+                const data = await response.json();
+                statusElement.textContent = `Verbunden (${data.devices} Geräte, ${data.scenes} Szenen)`;
+                statusElement.style.color = 'var(--success)';
+                this.showToast('Server-Verbindung erfolgreich!', 'success');
+                return true;
+            } else {
+                statusElement.textContent = `Fehler: HTTP ${response.status}`;
+                statusElement.style.color = 'var(--danger)';
+                this.showToast('Server nicht erreichbar', 'error');
+                return false;
+            }
+        } catch (error) {
+            console.error('Connection test failed:', error);
+            statusElement.textContent = 'Nicht erreichbar';
+            statusElement.style.color = 'var(--danger)';
+            this.showToast('Server nicht erreichbar: ' + error.message, 'error');
+            return false;
+        }
+    }
+
+    async searchServers() {
+        this.showToast('Suche nach Servern im Netzwerk...', 'info');
+
+        const searchButton = event.target;
+        searchButton.disabled = true;
+        searchButton.textContent = '⏳ Suche...';
+
+        const resultsDiv = document.getElementById('serverSearchResults');
+        const serverList = document.getElementById('serverList');
+        serverList.innerHTML = '';
+
+        // Get local network prefix (assuming /24 subnet)
+        const localIp = await this.getLocalIp();
+        const subnet = localIp ? localIp.substring(0, localIp.lastIndexOf('.')) : '192.168.1';
+
+        const foundServers = [];
+        const scanPromises = [];
+
+        // Scan common IPs in the subnet
+        for (let i = 1; i <= 254; i++) {
+            const testIp = `${subnet}.${i}`;
+
+            const scanPromise = fetch(`http://${testIp}:8000/api/health`, {
+                method: 'GET',
+                mode: 'cors',
+                signal: AbortSignal.timeout(1000)
+            })
+                .then(response => {
+                    if (response.ok) {
+                        return response.json().then(data => ({
+                            ip: testIp,
+                            ...data
+                        }));
+                    }
+                    return null;
+                })
+                .catch(() => null);
+
+            scanPromises.push(scanPromise);
+
+            // Limit concurrent requests
+            if (i % 20 === 0) {
+                await Promise.all(scanPromises);
+                scanPromises.length = 0;
+            }
+        }
+
+        // Wait for remaining scans
+        const results = await Promise.all(scanPromises);
+        const servers = results.filter(r => r !== null);
+
+        if (servers.length > 0) {
+            servers.forEach(server => {
+                const serverCard = document.createElement('div');
+                serverCard.className = 'server-card';
+                serverCard.innerHTML = `
+                    <div class="server-card-info">
+                        <strong>${server.ip}</strong>
+                        <p>${server.service || 'DMX Controller'} - ${server.devices || 0} Geräte</p>
+                    </div>
+                    <button class="btn btn-sm btn-primary" onclick="app.selectServer('${server.ip}')">
+                        Auswählen
+                    </button>
+                `;
+                serverList.appendChild(serverCard);
+            });
+
+            resultsDiv.style.display = 'block';
+            this.showToast(`${servers.length} Server gefunden`, 'success');
+        } else {
+            this.showToast('Keine Server gefunden', 'warning');
+        }
+
+        searchButton.disabled = false;
+        searchButton.textContent = '🔍 Suchen';
+    }
+
+    selectServer(ip) {
+        document.getElementById('serverIpInput').value = ip;
+        this.connectToServer();
+    }
+
+    async getLocalIp() {
+        // Try to detect local IP from WebRTC
+        try {
+            const pc = new RTCPeerConnection({ iceServers: [] });
+            pc.createDataChannel('');
+            const offer = await pc.createOffer();
+            await pc.setLocalDescription(offer);
+
+            return new Promise((resolve) => {
+                pc.onicecandidate = (ice) => {
+                    if (!ice || !ice.candidate || !ice.candidate.candidate) return;
+                    const ipMatch = /([0-9]{1,3}\.){3}[0-9]{1,3}/.exec(ice.candidate.candidate);
+                    if (ipMatch) {
+                        pc.close();
+                        resolve(ipMatch[0]);
+                    }
+                };
+                setTimeout(() => {
+                    pc.close();
+                    resolve('192.168.1');
+                }, 1000);
+            });
+        } catch (error) {
+            return '192.168.1';
+        }
+    }
+
+    resetToLocalhost() {
+        localStorage.removeItem('dmx_server_ip');
+        document.getElementById('serverIpInput').value = '';
+        this.updateServerUrls();
+        this.connectWebSocket();
+        this.showToast('Auf Localhost zurückgesetzt', 'success');
+        setTimeout(() => this.testServerConnection(), 500);
+    }
+
+    updateConnectionStatus(connected) {
+        const statusElement = document.getElementById('connectionStatusText');
+        if (statusElement) {
+            if (connected) {
+                statusElement.textContent = 'Verbunden';
+                statusElement.style.color = 'var(--success)';
+            } else {
+                statusElement.textContent = 'Getrennt';
+                statusElement.style.color = 'var(--danger)';
+            }
+        }
     }
 }
 
