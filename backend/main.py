@@ -1444,6 +1444,37 @@ async def get_audio_analyzer():
     return FileResponse(str(FRONTEND_DIR / "audioAnalyzer.js"))
 
 
+@app.get("/api/health")
+async def health_check():
+    """Health check endpoint für Server-Discovery"""
+    return {
+        "status": "ok",
+        "service": "DMX Web Controller",
+        "version": "1.0.0",
+        "devices": len(devices),
+        "scenes": len(scenes),
+        "groups": len(groups)
+    }
+
+
+@app.get("/api/server/info")
+async def get_server_info():
+    """Gibt Server-Informationen zurück"""
+    import socket
+    hostname = socket.gethostname()
+    try:
+        local_ip = socket.gethostbyname(hostname)
+    except:
+        local_ip = "unknown"
+
+    return {
+        "hostname": hostname,
+        "ip": local_ip,
+        "port": 8000,
+        "service": "DMX Web Controller"
+    }
+
+
 @app.get("/api/devices")
 async def get_devices():
     """Gibt alle Geräte zurück"""
@@ -1459,6 +1490,15 @@ async def discover_artnet_devices():
         # Create UDP socket
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+
+        # Bind to all interfaces to receive broadcasts from the network
+        try:
+            sock.bind(('0.0.0.0', 0))
+            logger.info("Art-Net discovery socket bound to 0.0.0.0")
+        except Exception as e:
+            logger.warning(f"Could not bind to 0.0.0.0: {e}, trying without explicit bind")
+
         sock.settimeout(3.0)  # 3 seconds timeout
 
         # Art-Net OpPoll packet (14 bytes)

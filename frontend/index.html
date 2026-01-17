@@ -263,6 +263,46 @@
                     <div class="settings-section">
                         <h2>⚙️ Einstellungen</h2>
 
+                        <!-- Server Connection Settings -->
+                        <div class="settings-card">
+                            <h3>🌐 Server-Verbindung</h3>
+                            <div class="form-group">
+                                <label>Server-IP Adresse</label>
+                                <div style="display: flex; gap: 0.5rem;">
+                                    <input type="text" id="serverIpInput" class="input" placeholder="192.168.1.100" style="flex: 1;">
+                                    <button class="btn btn-secondary" onclick="app.searchServers()">
+                                        🔍 Suchen
+                                    </button>
+                                </div>
+                                <p style="color: var(--text-muted); font-size: 0.875rem; margin-top: 0.5rem;">
+                                    Aktuelle Server-IP: <strong id="currentServerIp">Auto (localhost)</strong>
+                                </p>
+                            </div>
+                            <div class="form-group">
+                                <div class="button-group">
+                                    <button class="btn btn-primary" onclick="app.connectToServer()">
+                                        🔌 Verbinden
+                                    </button>
+                                    <button class="btn btn-secondary" onclick="app.testServerConnection()">
+                                        🧪 Verbindung testen
+                                    </button>
+                                    <button class="btn btn-secondary" onclick="app.resetToLocalhost()">
+                                        🏠 Reset auf Localhost
+                                    </button>
+                                </div>
+                            </div>
+                            <div id="serverSearchResults" style="display: none; margin-top: 1rem;">
+                                <label>Gefundene Server:</label>
+                                <div id="serverList" class="server-list"></div>
+                            </div>
+                            <div id="serverConnectionStatus" style="margin-top: 1rem;">
+                                <div class="info-row">
+                                    <span>Verbindungsstatus:</span>
+                                    <strong id="connectionStatusText" style="color: var(--text-muted)">Nicht verbunden</strong>
+                                </div>
+                            </div>
+                        </div>
+
                         <!-- Audio Settings -->
                         <div class="settings-card">
                             <h3>🎵 Audio Control</h3>
