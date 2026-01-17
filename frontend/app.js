@@ -16,6 +16,12 @@ class DMXController {
         this.currentEffect = null;
         this.reconnectInterval = null;
 
+        // Truss system
+        this.trusses = [];
+        this.currentTruss = null;
+        this.editingTruss = null;
+        this.spotAssignments = {}; // { spotId: { trussId, position, pan, tilt, targetX, targetY, targetZ } }
+
         this.init();
     }
 
@@ -213,6 +219,7 @@ class DMXController {
             'scenes': ['Szenen', 'Gespeicherte Lichtstimmungen'],
             'effects': ['Effekte', 'Dynamische Lichteffekte'],
             'sequences': ['Timeline', 'Erstelle Sequenzen aus Szenen und Effekten'],
+            'stage': ['Bühnen-Visualisierung', 'Live-Darstellung aller Spots auf der Bühne'],
             'settings': ['Einstellungen', 'App-Konfiguration und Audio-Einstellungen']
         };
 
@@ -226,10 +233,19 @@ class DMXController {
             'scenes': '<button class="btn btn-primary" onclick="app.showAddScene()"><svg width="20" height="20" viewBox="0 0 20 20"><path d="M10 3 L10 17 M3 10 L17 10" stroke="currentColor" stroke-width="2"/></svg><span>Szene erstellen</span></button>',
             'effects': '',
             'sequences': '<button class="btn btn-primary" onclick="app.showAddSequence()"><svg width="20" height="20" viewBox="0 0 20 20"><path d="M10 3 L10 17 M3 10 L17 10" stroke="currentColor" stroke-width="2"/></svg><span>Timeline hinzufügen</span></button>',
+            'stage': '',
             'settings': ''
         };
 
         document.getElementById('headerActions').innerHTML = buttons[tabName] || '';
+
+        // Initialize stage visualizer if switching to stage tab
+        if (tabName === 'stage') {
+            setTimeout(() => {
+                this.initStageVisualizer();
+                this.restoreStageDemoState();
+            }, 100);
+        }
     }
     
     // ===== Devices =====
@@ -2867,6 +2883,2450 @@ class DMXController {
             console.error('Error creating custom effect:', error);
             this.showToast('Fehler beim Erstellen', 'error');
         }
+    }
+
+    // ===== Stage Visualizer =====
+    initStageVisualizer() {
+        if (this.stageInitialized) return;
+
+        this.stageView = 'perspective';
+        this.showBeams = true;
+        this.showGrid = true;
+        this.showLabels = true;
+        this.stageCamera = { x: 0, y: -5, z: 10, rotX: -30, rotY: 0 };
+        this.stageSpots = [];
+        this.stageAnimationFrame = null;
+        this.stageFPS = 60;
+        this.stageLastFrame = Date.now();
+        this.stageDemoMode = false; // Start in live mode
+        this.stageDemoTime = 0; // For demo animation
+
+        const canvas = document.getElementById('stageCanvas');
+        if (!canvas) return;
+
+        const container = document.getElementById('stageCanvasContainer');
+        canvas.width = container.clientWidth;
+        canvas.height = container.clientHeight;
+
+        this.stageCtx = canvas.getContext('2d');
+        this.stageInitialized = true;
+
+        // Generate spots from devices or demo spots
+        this.updateStageSpots();
+
+        // Start rendering
+        this.renderStageFrame();
+
+        // Handle resize
+        window.addEventListener('resize', () => this.resizeStageCanvas());
+
+        // Handle mouse interaction
+        this.setupStageInteraction();
+    }
+
+    resizeStageCanvas() {
+        const canvas = document.getElementById('stageCanvas');
+        const container = document.getElementById('stageCanvasContainer');
+        if (!canvas || !container) return;
+
+        canvas.width = container.clientWidth;
+        canvas.height = container.clientHeight;
+    }
+
+    updateStageSpots() {
+        if (this.stageDemoMode) {
+            this.createDemoSpots();
+        } else {
+            // Load trusses if not loaded
+            if (!this.trusses || this.trusses.length === 0) {
+                this.loadTrusses();
+            }
+
+            this.stageSpots = this.devices.map((device, index) => {
+                const assignment = this.spotAssignments[device.id];
+
+                let x, y, z, pan = 0, tilt = -45;
+
+                if (assignment) {
+                    // Position based on truss assignment
+                    const truss = this.trusses.find(t => t.id === assignment.trussId);
+                    if (truss) {
+                        // Calculate position along truss
+                        const radians = (truss.rotation * Math.PI) / 180;
+                        x = truss.x + Math.cos(radians) * assignment.position;
+                        z = truss.z + Math.sin(radians) * assignment.position;
+                        y = truss.y;
+                        pan = assignment.pan;
+                        tilt = assignment.tilt;
+                    } else {
+                        // Fallback to grid
+                        const gridSize = Math.ceil(Math.sqrt(this.devices.length));
+                        const row = Math.floor(index / gridSize);
+                        const col = index % gridSize;
+                        const spacing = 3;
+                        x = (col - gridSize / 2) * spacing;
+                        y = 3;
+                        z = (row - gridSize / 2) * spacing;
+                    }
+                } else {
+                    // Auto-assign to first available truss
+                    if (this.trusses.length > 0) {
+                        const truss = this.trusses[0];
+
+                        // Find next available position on truss
+                        const assignedCount = Object.values(this.spotAssignments)
+                            .filter(a => a.trussId === truss.id).length;
+                        const position = -truss.length / 2 + (assignedCount + 1) * (truss.length / (this.devices.length + 1));
+
+                        // Create assignment
+                        this.spotAssignments[device.id] = {
+                            trussId: truss.id,
+                            position: position,
+                            pan: 0,
+                            tilt: -45,
+                            targetX: 0,
+                            targetY: 0,
+                            targetZ: 0
+                        };
+
+                        // Calculate position
+                        const radians = (truss.rotation * Math.PI) / 180;
+                        x = truss.x + Math.cos(radians) * position;
+                        z = truss.z + Math.sin(radians) * position;
+                        y = truss.y;
+                        pan = 0;
+                        tilt = -45;
+                    } else {
+                        // Fallback to grid if no trusses exist
+                        const gridSize = Math.ceil(Math.sqrt(this.devices.length));
+                        const row = Math.floor(index / gridSize);
+                        const col = index % gridSize;
+                        const spacing = 3;
+                        x = (col - gridSize / 2) * spacing;
+                        y = 3;
+                        z = (row - gridSize / 2) * spacing;
+                    }
+                }
+
+                return {
+                    id: device.id,
+                    name: device.name,
+                    x,
+                    y,
+                    z,
+                    pan,
+                    tilt,
+                    color: [255, 255, 255],
+                    intensity: 0,
+                    dmxValues: device.current_values || {},
+                    device: device,
+                    assignment: assignment
+                };
+            });
+        }
+
+        // Save assignments if any were created
+        this.saveTrusses();
+
+        // Update stats
+        this.updateStageStats();
+    }
+
+    createDemoSpots() {
+        // Create demo truss if not exists
+        const demoTrussId = 'demo-truss-1';
+        if (!this.trusses.find(t => t.id === demoTrussId)) {
+            this.trusses.push({
+                id: demoTrussId,
+                name: 'Demo Traverse',
+                x: 0,
+                y: 4,
+                z: -4,
+                length: 12,
+                rotation: 90,
+                isDemo: true
+            });
+        }
+
+        // Create spot assignments for demo devices
+        const demoTruss = this.trusses.find(t => t.id === demoTrussId);
+        const demoDeviceCount = 15;
+        const spacing = demoTruss.length / (demoDeviceCount + 1);
+
+        // Build stageSpots from demo truss
+        this.stageSpots = [];
+        for (let i = 0; i < demoDeviceCount; i++) {
+            const position = -demoTruss.length / 2 + spacing * (i + 1);
+            const radians = (demoTruss.rotation * Math.PI) / 180;
+            const x = demoTruss.x + Math.cos(radians) * position;
+            const z = demoTruss.z + Math.sin(radians) * position;
+
+            // Vary pan and tilt for visual interest
+            const pan = (i % 3 - 1) * 15; // -15, 0, 15 degrees
+            const tilt = -45 - (i % 2) * 10; // -45 or -55 degrees
+
+            this.stageSpots.push({
+                id: `demo-${i + 1}`,
+                name: `Demo Spot ${i + 1}`,
+                x: x,
+                y: demoTruss.y,
+                z: z,
+                pan: pan,
+                tilt: tilt,
+                color: [255, 255, 255],
+                intensity: 70,
+                type: 'demo',
+                trussId: demoTrussId,
+                position: position
+            });
+        }
+    }
+
+    updateDemoSpots() {
+        if (!this.stageDemoMode) return;
+
+        // Animate demo spots with varying colors and intensities
+        this.stageDemoTime += 0.016; // ~60fps
+
+        this.stageSpots.forEach((spot, index) => {
+            // Different animation speeds for different spots
+            const speed = 1 + (index % 3) * 0.5;
+            const offset = index * 0.5;
+
+            // Animate intensity with sine wave
+            const intensityBase = 30 + Math.sin(this.stageDemoTime * speed + offset) * 30;
+            spot.intensity = 40 + intensityBase;
+
+            // Animate colors with different frequencies
+            const hue = (this.stageDemoTime * 20 + index * 24) % 360;
+            const rgb = this.hslToRgb(hue / 360, 0.8, 0.5);
+            spot.color = [rgb.r, rgb.g, rgb.b];
+
+            // Occasional flash effect
+            if (Math.sin(this.stageDemoTime * 3 + index) > 0.95) {
+                spot.intensity = 100;
+                spot.color = [255, 255, 255];
+            }
+        });
+    }
+
+    hslToRgb(h, s, l) {
+        let r, g, b;
+
+        if (s === 0) {
+            r = g = b = l;
+        } else {
+            const hue2rgb = (p, q, t) => {
+                if (t < 0) t += 1;
+                if (t > 1) t -= 1;
+                if (t < 1/6) return p + (q - p) * 6 * t;
+                if (t < 1/2) return q;
+                if (t < 2/3) return p + (q - p) * (2/3 - t) * 6;
+                return p;
+            };
+
+            const q = l < 0.5 ? l * (1 + s) : l + s - l * s;
+            const p = 2 * l - q;
+            r = hue2rgb(p, q, h + 1/3);
+            g = hue2rgb(p, q, h);
+            b = hue2rgb(p, q, h - 1/3);
+        }
+
+        return { r: Math.round(r * 255), g: Math.round(g * 255), b: Math.round(b * 255) };
+    }
+
+    updateStageStats() {
+        const activeSpots = this.stageSpots.filter(s => s.intensity > 0).length;
+        const totalPower = this.stageSpots.reduce((sum, s) => {
+            return sum + (s.intensity / 100 * 200); // Assume 200W per spot at full
+        }, 0);
+
+        const activeEl = document.getElementById('stageActiveSpots');
+        const powerEl = document.getElementById('stageTotalPower');
+        const fpsEl = document.getElementById('stageFPS');
+
+        if (activeEl) activeEl.textContent = activeSpots;
+        if (powerEl) powerEl.textContent = Math.round(totalPower) + 'W';
+        if (fpsEl) fpsEl.textContent = Math.round(this.stageFPS);
+    }
+
+    renderStageFrame() {
+        if (!this.stageInitialized || this.currentTab !== 'stage') return;
+
+        // Calculate FPS
+        const now = Date.now();
+        const delta = now - this.stageLastFrame;
+        this.stageFPS = 1000 / delta;
+        this.stageLastFrame = now;
+
+        // Update spot data from devices or demo animation
+        if (this.stageDemoMode) {
+            this.updateDemoSpots();
+        } else {
+            this.updateStageSpotData();
+        }
+
+        // Clear canvas
+        const canvas = document.getElementById('stageCanvas');
+        const ctx = this.stageCtx;
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+        // Draw based on current view
+        if (this.stageView === 'perspective') {
+            this.renderPerspectiveView();
+        } else if (this.stageView === 'top') {
+            this.renderTopView();
+        } else if (this.stageView === 'front') {
+            this.renderFrontView();
+        }
+
+        // Update stats periodically
+        if (Math.random() < 0.1) {
+            this.updateStageStats();
+        }
+
+        // Continue animation
+        this.stageAnimationFrame = requestAnimationFrame(() => this.renderStageFrame());
+    }
+
+    updateStageSpotData() {
+        if (this.stageDemoMode) return; // Skip in demo mode
+
+        this.stageSpots.forEach(spot => {
+            const device = this.devices.find(d => d.id === spot.id);
+            if (!device || !device.current_values) return;
+
+            const values = device.current_values;
+
+            // Extract RGB color
+            if (device.channels) {
+                const redCh = device.channels.find(ch => ch.type === 'red');
+                const greenCh = device.channels.find(ch => ch.type === 'green');
+                const blueCh = device.channels.find(ch => ch.type === 'blue');
+                const dimmerCh = device.channels.find(ch => ch.type === 'dimmer');
+
+                if (redCh && greenCh && blueCh) {
+                    spot.color = [
+                        values[redCh.channel] || 0,
+                        values[greenCh.channel] || 0,
+                        values[blueCh.channel] || 0
+                    ];
+                }
+
+                if (dimmerCh) {
+                    spot.intensity = ((values[dimmerCh.channel] || 0) / 255) * 100;
+                } else {
+                    // Calculate intensity from RGB average
+                    const avg = (spot.color[0] + spot.color[1] + spot.color[2]) / 3;
+                    spot.intensity = (avg / 255) * 100;
+                }
+            }
+
+            spot.dmxValues = values;
+        });
+    }
+
+    renderPerspectiveView() {
+        const canvas = document.getElementById('stageCanvas');
+        const ctx = this.stageCtx;
+        const width = canvas.width;
+        const height = canvas.height;
+
+        // Draw stage floor
+        this.drawStageFloor(ctx, width, height);
+
+        // Sort spots by distance for correct layering
+        const sortedSpots = [...this.stageSpots].sort((a, b) => {
+            return (b.z - a.z); // Back to front
+        });
+
+        // Draw spots with beams
+        sortedSpots.forEach(spot => {
+            this.drawSpotPerspective(ctx, spot, width, height);
+        });
+    }
+
+    drawStageFloor(ctx, width, height) {
+        // Draw grid if enabled
+        if (!this.showGrid) return;
+
+        ctx.save();
+        ctx.strokeStyle = 'rgba(100, 116, 139, 0.3)';
+        ctx.lineWidth = 1;
+
+        const gridSize = 20;
+        const gridSpacing = 40;
+        const centerX = width / 2;
+        const centerY = height * 0.7;
+
+        for (let i = -gridSize; i <= gridSize; i++) {
+            // Horizontal lines
+            const y1 = centerY + (i * gridSpacing) * 0.3;
+            const y2 = centerY + (i * gridSpacing) * 0.3;
+            ctx.beginPath();
+            ctx.moveTo(centerX - gridSize * gridSpacing, y1);
+            ctx.lineTo(centerX + gridSize * gridSpacing, y2);
+            ctx.stroke();
+
+            // Vertical lines with perspective
+            const x = centerX + i * gridSpacing;
+            ctx.beginPath();
+            ctx.moveTo(x, centerY - gridSize * gridSpacing * 0.3);
+            ctx.lineTo(x, centerY + gridSize * gridSpacing * 0.3);
+            ctx.stroke();
+        }
+
+        ctx.restore();
+    }
+
+    drawSpotPerspective(ctx, spot, width, height) {
+        // Project 3D to 2D with perspective
+        const scale = 50;
+        const perspective = 800;
+        const centerX = width / 2;
+        const centerY = height * 0.7;
+
+        const z = spot.z + 5; // Add offset for perspective
+        const projScale = perspective / (perspective + z * scale);
+
+        const x2d = centerX + spot.x * scale * projScale;
+        const y2d = centerY - spot.y * scale * projScale + spot.z * scale * 0.3;
+
+        // Draw light beam if enabled
+        if (this.showBeams && spot.intensity > 5) {
+            this.drawLightBeam(ctx, x2d, y2d, spot, projScale);
+        }
+
+        // Draw spot fixture
+        const spotRadius = 15 * projScale;
+        const intensity = spot.intensity / 100;
+
+        // Glow effect
+        if (intensity > 0.1) {
+            const gradient = ctx.createRadialGradient(x2d, y2d, 0, x2d, y2d, spotRadius * 2);
+            gradient.addColorStop(0, `rgba(${spot.color[0]}, ${spot.color[1]}, ${spot.color[2]}, ${intensity * 0.5})`);
+            gradient.addColorStop(1, `rgba(${spot.color[0]}, ${spot.color[1]}, ${spot.color[2]}, 0)`);
+
+            ctx.fillStyle = gradient;
+            ctx.beginPath();
+            ctx.arc(x2d, y2d, spotRadius * 2, 0, Math.PI * 2);
+            ctx.fill();
+        }
+
+        // Spot body
+        ctx.fillStyle = intensity > 0.1 ?
+            `rgb(${Math.round(spot.color[0] * intensity)}, ${Math.round(spot.color[1] * intensity)}, ${Math.round(spot.color[2] * intensity)})` :
+            '#334155';
+        ctx.beginPath();
+        ctx.arc(x2d, y2d, spotRadius, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Border
+        ctx.strokeStyle = intensity > 0.5 ? '#fbbf24' : '#64748b';
+        ctx.lineWidth = 2;
+        ctx.stroke();
+
+        // Label if enabled
+        if (this.showLabels) {
+            ctx.fillStyle = '#e2e8f0';
+            ctx.font = `${10 * projScale}px sans-serif`;
+            ctx.textAlign = 'center';
+            ctx.fillText(spot.name, x2d, y2d + spotRadius + 15 * projScale);
+        }
+    }
+
+    drawLightBeam(ctx, x, y, spot, scale) {
+        const beamLength = 200 * scale;
+        const beamWidth = 60 * scale;
+        const intensity = spot.intensity / 100;
+
+        ctx.save();
+        ctx.globalAlpha = intensity * 0.4;
+
+        // Create beam gradient
+        const gradient = ctx.createLinearGradient(x, y, x, y + beamLength);
+        gradient.addColorStop(0, `rgba(${spot.color[0]}, ${spot.color[1]}, ${spot.color[2]}, 0.8)`);
+        gradient.addColorStop(1, `rgba(${spot.color[0]}, ${spot.color[1]}, ${spot.color[2]}, 0)`);
+
+        ctx.fillStyle = gradient;
+        ctx.beginPath();
+        ctx.moveTo(x, y);
+        ctx.lineTo(x - beamWidth / 2, y + beamLength);
+        ctx.lineTo(x + beamWidth / 2, y + beamLength);
+        ctx.closePath();
+        ctx.fill();
+
+        ctx.restore();
+    }
+
+    renderTopView() {
+        const canvas = document.getElementById('stageCanvas');
+        const ctx = this.stageCtx;
+        const width = canvas.width;
+        const height = canvas.height;
+
+        const scale = 30;
+        const centerX = width / 2;
+        const centerY = height / 2;
+
+        // Draw grid
+        if (this.showGrid) {
+            ctx.strokeStyle = 'rgba(100, 116, 139, 0.3)';
+            ctx.lineWidth = 1;
+
+            for (let i = -10; i <= 10; i++) {
+                ctx.beginPath();
+                ctx.moveTo(centerX + i * scale, centerY - 10 * scale);
+                ctx.lineTo(centerX + i * scale, centerY + 10 * scale);
+                ctx.stroke();
+
+                ctx.beginPath();
+                ctx.moveTo(centerX - 10 * scale, centerY + i * scale);
+                ctx.lineTo(centerX + 10 * scale, centerY + i * scale);
+                ctx.stroke();
+            }
+        }
+
+        // Draw trusses
+        this.trusses.forEach(truss => {
+            const trussX2d = centerX + truss.x * scale;
+            const trussZ2d = centerY + truss.z * scale;
+
+            const radians = (truss.rotation * Math.PI) / 180;
+            const halfLength = (truss.length / 2) * scale;
+
+            // Calculate truss endpoints
+            const startX = trussX2d - Math.cos(radians) * halfLength;
+            const startY = trussZ2d - Math.sin(radians) * halfLength;
+            const endX = trussX2d + Math.cos(radians) * halfLength;
+            const endY = trussZ2d + Math.sin(radians) * halfLength;
+
+            // Draw truss line
+            ctx.strokeStyle = '#94a3b8';
+            ctx.lineWidth = 8;
+            ctx.lineCap = 'round';
+            ctx.beginPath();
+            ctx.moveTo(startX, startY);
+            ctx.lineTo(endX, endY);
+            ctx.stroke();
+
+            // Draw truss endpoints (handles)
+            ctx.fillStyle = '#64748b';
+            ctx.beginPath();
+            ctx.arc(startX, startY, 6, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.beginPath();
+            ctx.arc(endX, endY, 6, 0, Math.PI * 2);
+            ctx.fill();
+
+            // Draw truss center point
+            ctx.fillStyle = '#475569';
+            ctx.beginPath();
+            ctx.arc(trussX2d, trussZ2d, 4, 0, Math.PI * 2);
+            ctx.fill();
+
+            // Draw truss label
+            if (this.showLabels) {
+                ctx.fillStyle = '#f1f5f9';
+                ctx.font = '12px monospace';
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'bottom';
+                ctx.fillText(truss.name, trussX2d, trussZ2d - 10);
+            }
+        });
+
+        // Draw connection lines from spots to trusses
+        this.stageSpots.forEach((spot, index) => {
+            const trussId = spot.trussId || (spot.assignment && spot.assignment.trussId);
+            if (trussId) {
+                const truss = this.trusses.find(t => t.id === trussId);
+                if (truss) {
+                    const spotX2d = centerX + spot.x * scale;
+                    const spotZ2d = centerY + spot.z * scale;
+
+                    // Find closest point on truss to draw connection
+                    const trussX2d = centerX + truss.x * scale;
+                    const trussZ2d = centerY + truss.z * scale;
+
+                    // Draw connection line (cable)
+                    ctx.strokeStyle = 'rgba(100, 116, 139, 0.5)';
+                    ctx.lineWidth = 2;
+                    ctx.setLineDash([3, 3]);
+                    ctx.beginPath();
+                    ctx.moveTo(trussX2d, trussZ2d);
+                    ctx.lineTo(spotX2d, spotZ2d);
+                    ctx.stroke();
+                    ctx.setLineDash([]);
+
+                    // Draw mounting bracket on truss
+                    ctx.fillStyle = '#64748b';
+                    ctx.beginPath();
+                    ctx.arc(trussX2d, trussZ2d, 4, 0, Math.PI * 2);
+                    ctx.fill();
+                }
+            }
+        });
+
+        // Draw spots
+        this.stageSpots.forEach((spot, index) => {
+            const x2d = centerX + spot.x * scale;
+            const y2d = centerY + spot.z * scale;
+            const radius = 15;
+            const intensity = spot.intensity / 100;
+
+            // Glow
+            if (intensity > 0.1 && this.showBeams) {
+                const gradient = ctx.createRadialGradient(x2d, y2d, 0, x2d, y2d, radius * 3);
+                gradient.addColorStop(0, `rgba(${spot.color[0]}, ${spot.color[1]}, ${spot.color[2]}, ${intensity * 0.6})`);
+                gradient.addColorStop(1, `rgba(${spot.color[0]}, ${spot.color[1]}, ${spot.color[2]}, 0)`);
+
+                ctx.fillStyle = gradient;
+                ctx.beginPath();
+                ctx.arc(x2d, y2d, radius * 3, 0, Math.PI * 2);
+                ctx.fill();
+            }
+
+            // Spot body (always draw)
+            ctx.fillStyle = intensity > 0.1 ?
+                `rgb(${Math.round(spot.color[0] * intensity)}, ${Math.round(spot.color[1] * intensity)}, ${Math.round(spot.color[2] * intensity)})` :
+                '#334155';
+            ctx.beginPath();
+            ctx.arc(x2d, y2d, radius, 0, Math.PI * 2);
+            ctx.fill();
+
+            // Outline
+            ctx.strokeStyle = intensity > 0.5 ? '#fbbf24' : '#64748b';
+            ctx.lineWidth = 2;
+            ctx.stroke();
+
+            // Label
+            if (this.showLabels) {
+                ctx.fillStyle = '#e2e8f0';
+                ctx.font = '11px sans-serif';
+                ctx.textAlign = 'center';
+                ctx.fillText(spot.name, x2d, y2d + radius + 15);
+            }
+        });
+    }
+
+    renderFrontView() {
+        const canvas = document.getElementById('stageCanvas');
+        const ctx = this.stageCtx;
+        const width = canvas.width;
+        const height = canvas.height;
+
+        const scale = 40;
+        const centerX = width / 2;
+        const floorY = height * 0.8;
+
+        // Draw stage line
+        ctx.strokeStyle = 'rgba(100, 116, 139, 0.5)';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(0, floorY);
+        ctx.lineTo(width, floorY);
+        ctx.stroke();
+
+        // Sort by X position
+        const sortedSpots = [...this.stageSpots].sort((a, b) => a.x - b.x);
+
+        // Draw spots
+        sortedSpots.forEach(spot => {
+            const x2d = centerX + spot.x * scale;
+            const y2d = floorY - spot.y * scale;
+            const radius = 20;
+            const intensity = spot.intensity / 100;
+
+            // Beam
+            if (this.showBeams && intensity > 0.1) {
+                const beamLength = 300;
+                const beamWidth = 80;
+
+                ctx.save();
+                ctx.globalAlpha = intensity * 0.3;
+
+                const gradient = ctx.createLinearGradient(x2d, y2d, x2d, y2d + beamLength);
+                gradient.addColorStop(0, `rgba(${spot.color[0]}, ${spot.color[1]}, ${spot.color[2]}, 0.8)`);
+                gradient.addColorStop(1, `rgba(${spot.color[0]}, ${spot.color[1]}, ${spot.color[2]}, 0)`);
+
+                ctx.fillStyle = gradient;
+                ctx.beginPath();
+                ctx.moveTo(x2d, y2d);
+                ctx.lineTo(x2d - beamWidth / 2, y2d + beamLength);
+                ctx.lineTo(x2d + beamWidth / 2, y2d + beamLength);
+                ctx.closePath();
+                ctx.fill();
+
+                ctx.restore();
+            }
+
+            // Glow
+            if (intensity > 0.1) {
+                const gradient = ctx.createRadialGradient(x2d, y2d, 0, x2d, y2d, radius * 2.5);
+                gradient.addColorStop(0, `rgba(${spot.color[0]}, ${spot.color[1]}, ${spot.color[2]}, ${intensity * 0.6})`);
+                gradient.addColorStop(1, `rgba(${spot.color[0]}, ${spot.color[1]}, ${spot.color[2]}, 0)`);
+
+                ctx.fillStyle = gradient;
+                ctx.beginPath();
+                ctx.arc(x2d, y2d, radius * 2.5, 0, Math.PI * 2);
+                ctx.fill();
+            }
+
+            // Spot
+            ctx.fillStyle = intensity > 0.1 ?
+                `rgb(${Math.round(spot.color[0] * intensity)}, ${Math.round(spot.color[1] * intensity)}, ${Math.round(spot.color[2] * intensity)})` :
+                '#334155';
+            ctx.beginPath();
+            ctx.arc(x2d, y2d, radius, 0, Math.PI * 2);
+            ctx.fill();
+
+            ctx.strokeStyle = intensity > 0.5 ? '#fbbf24' : '#64748b';
+            ctx.lineWidth = 2;
+            ctx.stroke();
+
+            // Label
+            if (this.showLabels) {
+                ctx.fillStyle = '#e2e8f0';
+                ctx.font = '11px sans-serif';
+                ctx.textAlign = 'center';
+                ctx.fillText(spot.name, x2d, y2d - radius - 10);
+            }
+        });
+    }
+
+    setupStageInteraction() {
+        const canvas = document.getElementById('stageCanvas');
+        if (!canvas) return;
+
+        let isDragging = false;
+        let isDraggingSpot = false;
+        let isDraggingTruss = false;
+        let isDraggingTrussEnd = false;
+        let draggedSpot = null;
+        let draggedTruss = null;
+        let lastX = 0;
+        let lastY = 0;
+
+        const handleStart = (clientX, clientY) => {
+            const rect = canvas.getBoundingClientRect();
+            const x = clientX - rect.left;
+            const y = clientY - rect.top;
+
+            // Check if clicking on a truss end (for length adjustment)
+            const trussEnd = this.getTrussEndAtPosition(x, y);
+            if (trussEnd && this.stageView === 'top') {
+                isDraggingTrussEnd = true;
+                draggedTruss = trussEnd.truss;
+                canvas.style.cursor = 'ew-resize';
+            }
+            // Check if clicking on a truss (for position)
+            else if (!trussEnd) {
+                const truss = this.getTrussAtPosition(x, y);
+                if (truss && this.stageView === 'top') {
+                    isDraggingTruss = true;
+                    draggedTruss = truss;
+                    canvas.style.cursor = 'grabbing';
+                }
+                // Check if clicking on a spot
+                else {
+                    const spot = this.getSpotAtPosition(x, y);
+                    if (spot && (this.stageView === 'top' || this.stageView === 'front')) {
+                        isDraggingSpot = true;
+                        draggedSpot = spot;
+                        canvas.style.cursor = 'grabbing';
+                    } else {
+                        isDragging = true;
+                    }
+                }
+            }
+
+            lastX = clientX;
+            lastY = clientY;
+        };
+
+        const handleMove = (clientX, clientY) => {
+            const rect = canvas.getBoundingClientRect();
+            const x = clientX - rect.left;
+            const y = clientY - rect.top;
+
+            if (isDraggingTruss && draggedTruss) {
+                // Move truss
+                const deltaX = (clientX - lastX) / 30;
+                const deltaY = (clientY - lastY) / 30;
+
+                if (this.stageView === 'top') {
+                    draggedTruss.x += deltaX;
+                    draggedTruss.z += deltaY;
+
+                    // Update all spots on this truss
+                    this.updateStageSpots();
+                    if (this.threeInitialized && this.stageView === '3d') {
+                        this.rebuild3DScene();
+                    }
+                }
+
+                lastX = clientX;
+                lastY = clientY;
+            } else if (isDraggingTrussEnd && draggedTruss) {
+                // Adjust truss length
+                const deltaX = (clientX - lastX) / 30;
+
+                draggedTruss.length = Math.max(2, draggedTruss.length + deltaX);
+
+                // Update spots
+                this.updateStageSpots();
+                if (this.threeInitialized && this.stageView === '3d') {
+                    this.rebuild3DScene();
+                }
+
+                lastX = clientX;
+                lastY = clientY;
+            } else if (isDraggingSpot && draggedSpot) {
+                // Move spot along truss only
+                if (draggedSpot.trussId || (draggedSpot.assignment && draggedSpot.assignment.trussId)) {
+                    const trussId = draggedSpot.trussId || draggedSpot.assignment.trussId;
+                    const truss = this.trusses.find(t => t.id === trussId);
+
+                    if (truss) {
+                        const deltaX = (clientX - lastX) / 30;
+                        const deltaY = (clientY - lastY) / 30;
+
+                        // Project movement onto truss direction
+                        const radians = (truss.rotation * Math.PI) / 180;
+                        const trussDir = { x: Math.cos(radians), z: Math.sin(radians) };
+                        const movement = deltaX * trussDir.x + deltaY * trussDir.z;
+
+                        // Update position along truss
+                        const currentPos = draggedSpot.position || 0;
+                        const newPos = Math.max(-truss.length / 2, Math.min(truss.length / 2, currentPos + movement));
+
+                        // Update assignment or spot directly
+                        if (this.stageDemoMode) {
+                            draggedSpot.position = newPos;
+                            draggedSpot.x = truss.x + Math.cos(radians) * newPos;
+                            draggedSpot.z = truss.z + Math.sin(radians) * newPos;
+                        } else {
+                            const assignment = this.spotAssignments[draggedSpot.id];
+                            if (assignment) {
+                                assignment.position = newPos;
+                                this.updateStageSpots();
+                            }
+                        }
+                    }
+                }
+
+                lastX = clientX;
+                lastY = clientY;
+            } else if (isDragging && this.stageView === 'perspective') {
+                const deltaX = clientX - lastX;
+                const deltaY = clientY - lastY;
+
+                this.stageCamera.rotY += deltaX * 0.5;
+                this.stageCamera.rotX += deltaY * 0.5;
+
+                lastX = clientX;
+                lastY = clientY;
+            } else {
+                // Update cursor based on what's under mouse
+                const trussEnd = this.getTrussEndAtPosition(x, y);
+                if (trussEnd && this.stageView === 'top') {
+                    canvas.style.cursor = 'ew-resize';
+                } else {
+                    const truss = this.getTrussAtPosition(x, y);
+                    if (truss && this.stageView === 'top') {
+                        canvas.style.cursor = 'move';
+                    } else {
+                        const spot = this.getSpotAtPosition(x, y);
+                        if (spot && (this.stageView === 'top' || this.stageView === 'front')) {
+                            canvas.style.cursor = 'grab';
+                        } else {
+                            canvas.style.cursor = 'default';
+                        }
+                    }
+                }
+            }
+
+            // Show spot details on hover
+            this.handleStageHover(clientX, clientY);
+        };
+
+        const handleEnd = () => {
+            if (isDraggingTruss || isDraggingTrussEnd) {
+                // Save truss changes
+                this.saveTrusses();
+            }
+
+            isDragging = false;
+            isDraggingSpot = false;
+            isDraggingTruss = false;
+            isDraggingTrussEnd = false;
+            draggedSpot = null;
+            draggedTruss = null;
+            canvas.style.cursor = 'default';
+        };
+
+        // Mouse events
+        canvas.addEventListener('mousedown', (e) => handleStart(e.clientX, e.clientY));
+        canvas.addEventListener('mousemove', (e) => handleMove(e.clientX, e.clientY));
+        canvas.addEventListener('mouseup', handleEnd);
+        canvas.addEventListener('mouseleave', () => {
+            handleEnd();
+            this.hideSpotDetails();
+        });
+
+        // Touch events
+        canvas.addEventListener('touchstart', (e) => {
+            e.preventDefault();
+            if (e.touches.length === 1) {
+                handleStart(e.touches[0].clientX, e.touches[0].clientY);
+            }
+        });
+
+        canvas.addEventListener('touchmove', (e) => {
+            e.preventDefault();
+            if (e.touches.length === 1) {
+                handleMove(e.touches[0].clientX, e.touches[0].clientY);
+            }
+        });
+
+        canvas.addEventListener('touchend', (e) => {
+            e.preventDefault();
+            handleEnd();
+        });
+
+        // Zoom with mouse wheel
+        canvas.addEventListener('wheel', (e) => {
+            e.preventDefault();
+            this.stageCamera.z += e.deltaY * 0.01;
+            this.stageCamera.z = Math.max(5, Math.min(20, this.stageCamera.z));
+        });
+    }
+
+    getSpotAtPosition(x, y) {
+        const canvas = document.getElementById('stageCanvas');
+        const width = canvas.width;
+        const height = canvas.height;
+
+        if (this.stageView === 'top') {
+            const scale = 30;
+            const centerX = width / 2;
+            const centerY = height / 2;
+
+            for (const spot of this.stageSpots) {
+                const x2d = centerX + spot.x * scale;
+                const y2d = centerY + spot.z * scale;
+                const radius = 15;
+
+                const dist = Math.sqrt((x - x2d) ** 2 + (y - y2d) ** 2);
+                if (dist < radius) {
+                    return spot;
+                }
+            }
+        } else if (this.stageView === 'front') {
+            const scale = 30;
+            const centerX = width / 2;
+            const baseY = height - 100;
+
+            for (const spot of this.stageSpots) {
+                const x2d = centerX + spot.x * scale;
+                const y2d = baseY - spot.y * scale;
+                const radius = 15;
+
+                const dist = Math.sqrt((x - x2d) ** 2 + (y - y2d) ** 2);
+                if (dist < radius) {
+                    return spot;
+                }
+            }
+        }
+
+        return null;
+    }
+
+    getTrussAtPosition(x, y) {
+        if (this.stageView !== 'top') return null;
+
+        const canvas = document.getElementById('stageCanvas');
+        const width = canvas.width;
+        const height = canvas.height;
+        const scale = 30;
+        const centerX = width / 2;
+        const centerY = height / 2;
+
+        for (const truss of this.trusses) {
+            const trussX2d = centerX + truss.x * scale;
+            const trussZ2d = centerY + truss.z * scale;
+
+            const radians = (truss.rotation * Math.PI) / 180;
+            const halfLength = (truss.length / 2) * scale;
+
+            // Calculate truss endpoints
+            const startX = trussX2d - Math.cos(radians) * halfLength;
+            const startY = trussZ2d - Math.sin(radians) * halfLength;
+            const endX = trussX2d + Math.cos(radians) * halfLength;
+            const endY = trussZ2d + Math.sin(radians) * halfLength;
+
+            // Distance from point to line segment
+            const dist = this.pointToLineDistance(x, y, startX, startY, endX, endY);
+
+            if (dist < 10) {
+                return truss;
+            }
+        }
+
+        return null;
+    }
+
+    getTrussEndAtPosition(x, y) {
+        if (this.stageView !== 'top') return null;
+
+        const canvas = document.getElementById('stageCanvas');
+        const width = canvas.width;
+        const height = canvas.height;
+        const scale = 30;
+        const centerX = width / 2;
+        const centerY = height / 2;
+
+        for (const truss of this.trusses) {
+            const trussX2d = centerX + truss.x * scale;
+            const trussZ2d = centerY + truss.z * scale;
+
+            const radians = (truss.rotation * Math.PI) / 180;
+            const halfLength = (truss.length / 2) * scale;
+
+            // Calculate truss endpoints
+            const endX = trussX2d + Math.cos(radians) * halfLength;
+            const endY = trussZ2d + Math.sin(radians) * halfLength;
+
+            // Check if near end point
+            const dist = Math.sqrt((x - endX) ** 2 + (y - endY) ** 2);
+
+            if (dist < 15) {
+                return { truss, end: 'right' };
+            }
+        }
+
+        return null;
+    }
+
+    pointToLineDistance(px, py, x1, y1, x2, y2) {
+        const dx = x2 - x1;
+        const dy = y2 - y1;
+        const lengthSquared = dx * dx + dy * dy;
+
+        if (lengthSquared === 0) {
+            return Math.sqrt((px - x1) ** 2 + (py - y1) ** 2);
+        }
+
+        let t = ((px - x1) * dx + (py - y1) * dy) / lengthSquared;
+        t = Math.max(0, Math.min(1, t));
+
+        const closestX = x1 + t * dx;
+        const closestY = y1 + t * dy;
+
+        return Math.sqrt((px - closestX) ** 2 + (py - closestY) ** 2);
+    }
+
+    handleStageHover(clientX, clientY) {
+        const canvas = document.getElementById('stageCanvas');
+        const rect = canvas.getBoundingClientRect();
+        const x = clientX - rect.left;
+        const y = clientY - rect.top;
+
+        // Check if hovering over a spot (simplified check for top view)
+        if (this.stageView === 'top') {
+            const width = canvas.width;
+            const height = canvas.height;
+            const scale = 30;
+            const centerX = width / 2;
+            const centerY = height / 2;
+
+            for (const spot of this.stageSpots) {
+                const x2d = centerX + spot.x * scale;
+                const y2d = centerY + spot.z * scale;
+                const distance = Math.sqrt((x - x2d) ** 2 + (y - y2d) ** 2);
+
+                if (distance < 20) {
+                    this.showSpotDetails(spot, clientX, clientY);
+                    return;
+                }
+            }
+        }
+
+        this.hideSpotDetails();
+    }
+
+    showSpotDetails(spot, x, y) {
+        const popup = document.getElementById('spotDetailsPopup');
+        if (!popup) return;
+
+        document.getElementById('spotDetailName').textContent = spot.name;
+        document.getElementById('spotDetailPosition').textContent =
+            `X:${spot.x.toFixed(1)} Y:${spot.y.toFixed(1)} Z:${spot.z.toFixed(1)}`;
+
+        const colorDiv = document.getElementById('spotDetailColor');
+        colorDiv.style.background = `rgb(${spot.color[0]}, ${spot.color[1]}, ${spot.color[2]})`;
+
+        document.getElementById('spotDetailIntensity').textContent = `${Math.round(spot.intensity)}%`;
+
+        if (spot.device) {
+            const device = spot.device;
+            const startCh = device.start_channel || 1;
+            const chCount = device.channels ? device.channels.length : 0;
+            document.getElementById('spotDetailDMX').textContent = `Ch ${startCh}-${startCh + chCount - 1}`;
+        } else {
+            document.getElementById('spotDetailDMX').textContent = 'Demo';
+        }
+
+        popup.style.display = 'block';
+        popup.style.left = (x + 15) + 'px';
+        popup.style.top = (y + 15) + 'px';
+    }
+
+    hideSpotDetails() {
+        const popup = document.getElementById('spotDetailsPopup');
+        if (popup) popup.style.display = 'none';
+    }
+
+    setStageView(view) {
+        this.stageView = view;
+
+        document.querySelectorAll('[data-view]').forEach(btn => {
+            btn.classList.remove('active');
+        });
+        document.querySelector(`[data-view="${view}"]`).classList.add('active');
+
+        // Switch between 2D canvas and 3D Three.js
+        const canvas2D = document.getElementById('stageCanvas');
+        const container3D = document.getElementById('stage3DContainer');
+
+        if (view === '3d') {
+            // Show 3D container, hide 2D canvas
+            canvas2D.style.display = 'none';
+            container3D.style.display = 'block';
+
+            // Initialize Three.js if not already done
+            if (!this.threeInitialized) {
+                this.initThreeJS();
+            } else {
+                // Update 3D scene with current spots and trusses
+                this.rebuild3DScene();
+            }
+        } else {
+            // Show 2D canvas, hide 3D container
+            canvas2D.style.display = 'block';
+            container3D.style.display = 'none';
+        }
+    }
+
+    toggleStageDemoMode() {
+        this.stageDemoMode = !this.stageDemoMode;
+        this.stageDemoTime = 0; // Reset animation time
+
+        if (this.stageDemoMode) {
+            // Add demo devices to device list
+            this.addDemoDevices();
+        } else {
+            // Remove demo devices from device list
+            this.removeDemoDevices();
+
+            // Remove demo trusses
+            this.trusses = this.trusses.filter(t => !t.isDemo);
+            this.saveTrusses();
+
+            // Clear demo spot assignments
+            Object.keys(this.spotAssignments).forEach(spotId => {
+                if (spotId.startsWith('demo-')) {
+                    delete this.spotAssignments[spotId];
+                }
+            });
+        }
+
+        // Update button states
+        this.updateStageDemoButtons();
+
+        // Regenerate spots for both 2D and 3D
+        this.updateStageSpots();
+
+        // Update 3D spots and trusses if in 3D view
+        if (this.threeInitialized && this.stageView === '3d') {
+            this.rebuild3DScene();
+        }
+    }
+
+    updateStageDemoButtons() {
+        const demoBtn = document.getElementById('stageDemoModeBtn');
+        const liveBtn = document.getElementById('stageLiveModeBtn');
+
+        if (!demoBtn || !liveBtn) return;
+
+        if (this.stageDemoMode) {
+            demoBtn.classList.add('active');
+            liveBtn.classList.remove('active');
+        } else {
+            demoBtn.classList.remove('active');
+            liveBtn.classList.add('active');
+        }
+    }
+
+    restoreStageDemoState() {
+        // Restore demo mode button states after tab switch
+        this.updateStageDemoButtons();
+
+        // If demo mode is active, make sure demo devices are loaded
+        if (this.stageDemoMode) {
+            // Check if demo devices are already in the list
+            const hasDemo = this.devices.some(d => d.id && d.id.startsWith('demo-'));
+
+            if (!hasDemo) {
+                // Re-add demo devices if they were removed
+                this.addDemoDevices();
+            }
+
+            // Update stage spots to reflect demo mode
+            this.updateStageSpots();
+
+            // Update 3D spots if in 3D view
+            if (this.threeInitialized && this.stageView === '3d') {
+                this.update3DSpots();
+            }
+        }
+    }
+
+    addDemoDevices() {
+        // Store original devices to restore later
+        if (!this.originalDevices) {
+            this.originalDevices = [...this.devices];
+        }
+
+        // Create demo devices with realistic DMX structure
+        const demoDevices = [
+            {
+                id: 'demo-1',
+                name: 'PAR Front L',
+                device_type: 'spot_rgb',
+                universe: 1,
+                start_channel: 1,
+                values: [0, 255, 0, 0],
+                current_values: { 1: 0, 2: 255, 3: 0, 4: 0 },
+                channels: [
+                    { channel: 1, type: 'dimmer', name: 'Dimmer' },
+                    { channel: 2, type: 'red', name: 'Red' },
+                    { channel: 3, type: 'green', name: 'Green' },
+                    { channel: 4, type: 'blue', name: 'Blue' }
+                ]
+            },
+            {
+                id: 'demo-2',
+                name: 'PAR Front C',
+                device_type: 'spot_rgb',
+                universe: 1,
+                start_channel: 5,
+                values: [0, 0, 255, 0],
+                current_values: { 5: 0, 6: 0, 7: 255, 8: 0 },
+                channels: [
+                    { channel: 5, type: 'dimmer', name: 'Dimmer' },
+                    { channel: 6, type: 'red', name: 'Red' },
+                    { channel: 7, type: 'green', name: 'Green' },
+                    { channel: 8, type: 'blue', name: 'Blue' }
+                ]
+            },
+            {
+                id: 'demo-3',
+                name: 'PAR Front R',
+                device_type: 'spot_rgb',
+                universe: 1,
+                start_channel: 9,
+                values: [0, 0, 0, 255],
+                current_values: { 9: 0, 10: 0, 11: 0, 12: 255 },
+                channels: [
+                    { channel: 9, type: 'dimmer', name: 'Dimmer' },
+                    { channel: 10, type: 'red', name: 'Red' },
+                    { channel: 11, type: 'green', name: 'Green' },
+                    { channel: 12, type: 'blue', name: 'Blue' }
+                ]
+            },
+            {
+                id: 'demo-4',
+                name: 'Moving Head L',
+                device_type: 'spot_rgb',
+                universe: 1,
+                start_channel: 13,
+                values: [0, 255, 255, 0],
+                current_values: { 13: 0, 14: 255, 15: 255, 16: 0 },
+                channels: [
+                    { channel: 13, type: 'dimmer', name: 'Dimmer' },
+                    { channel: 14, type: 'red', name: 'Red' },
+                    { channel: 15, type: 'green', name: 'Green' },
+                    { channel: 16, type: 'blue', name: 'Blue' }
+                ]
+            },
+            {
+                id: 'demo-5',
+                name: 'Moving Head C',
+                device_type: 'spot_rgb',
+                universe: 1,
+                start_channel: 17,
+                values: [0, 255, 0, 255],
+                current_values: { 17: 0, 18: 255, 19: 0, 20: 255 },
+                channels: [
+                    { channel: 17, type: 'dimmer', name: 'Dimmer' },
+                    { channel: 18, type: 'red', name: 'Red' },
+                    { channel: 19, type: 'green', name: 'Green' },
+                    { channel: 20, type: 'blue', name: 'Blue' }
+                ]
+            },
+            {
+                id: 'demo-6',
+                name: 'Moving Head R',
+                device_type: 'spot_rgb',
+                universe: 1,
+                start_channel: 21,
+                values: [0, 0, 255, 255],
+                current_values: { 21: 0, 22: 0, 23: 255, 24: 255 },
+                channels: [
+                    { channel: 21, type: 'dimmer', name: 'Dimmer' },
+                    { channel: 22, type: 'red', name: 'Red' },
+                    { channel: 23, type: 'green', name: 'Green' },
+                    { channel: 24, type: 'blue', name: 'Blue' }
+                ]
+            },
+            {
+                id: 'demo-7',
+                name: 'Wash Back L',
+                device_type: 'spot_rgb',
+                universe: 1,
+                start_channel: 25,
+                values: [0, 255, 128, 0],
+                current_values: { 25: 0, 26: 255, 27: 128, 28: 0 },
+                channels: [
+                    { channel: 25, type: 'dimmer', name: 'Dimmer' },
+                    { channel: 26, type: 'red', name: 'Red' },
+                    { channel: 27, type: 'green', name: 'Green' },
+                    { channel: 28, type: 'blue', name: 'Blue' }
+                ]
+            },
+            {
+                id: 'demo-8',
+                name: 'Wash Back C',
+                device_type: 'spot_rgb',
+                universe: 1,
+                start_channel: 29,
+                values: [0, 128, 255, 128],
+                current_values: { 29: 0, 30: 128, 31: 255, 32: 128 },
+                channels: [
+                    { channel: 29, type: 'dimmer', name: 'Dimmer' },
+                    { channel: 30, type: 'red', name: 'Red' },
+                    { channel: 31, type: 'green', name: 'Green' },
+                    { channel: 32, type: 'blue', name: 'Blue' }
+                ]
+            },
+            {
+                id: 'demo-9',
+                name: 'Wash Back R',
+                device_type: 'spot_rgb',
+                universe: 1,
+                start_channel: 33,
+                values: [0, 128, 128, 255],
+                current_values: { 33: 0, 34: 128, 35: 128, 36: 255 },
+                channels: [
+                    { channel: 33, type: 'dimmer', name: 'Dimmer' },
+                    { channel: 34, type: 'red', name: 'Red' },
+                    { channel: 35, type: 'green', name: 'Green' },
+                    { channel: 36, type: 'blue', name: 'Blue' }
+                ]
+            },
+            {
+                id: 'demo-10',
+                name: 'Side Spot L',
+                device_type: 'spot_rgb',
+                universe: 1,
+                start_channel: 37,
+                values: [0, 255, 200, 100],
+                current_values: { 37: 0, 38: 255, 39: 200, 40: 100 },
+                channels: [
+                    { channel: 37, type: 'dimmer', name: 'Dimmer' },
+                    { channel: 38, type: 'red', name: 'Red' },
+                    { channel: 39, type: 'green', name: 'Green' },
+                    { channel: 40, type: 'blue', name: 'Blue' }
+                ]
+            },
+            {
+                id: 'demo-11',
+                name: 'Side Spot R',
+                device_type: 'spot_rgb',
+                universe: 1,
+                start_channel: 41,
+                values: [0, 100, 200, 255],
+                current_values: { 41: 0, 42: 100, 43: 200, 44: 255 },
+                channels: [
+                    { channel: 41, type: 'dimmer', name: 'Dimmer' },
+                    { channel: 42, type: 'red', name: 'Red' },
+                    { channel: 43, type: 'green', name: 'Green' },
+                    { channel: 44, type: 'blue', name: 'Blue' }
+                ]
+            },
+            {
+                id: 'demo-12',
+                name: 'Truss Front L',
+                device_type: 'spot_rgb',
+                universe: 1,
+                start_channel: 45,
+                values: [0, 255, 100, 200],
+                current_values: { 45: 0, 46: 255, 47: 100, 48: 200 },
+                channels: [
+                    { channel: 45, type: 'dimmer', name: 'Dimmer' },
+                    { channel: 46, type: 'red', name: 'Red' },
+                    { channel: 47, type: 'green', name: 'Green' },
+                    { channel: 48, type: 'blue', name: 'Blue' }
+                ]
+            },
+            {
+                id: 'demo-13',
+                name: 'Truss Front R',
+                device_type: 'spot_rgb',
+                universe: 1,
+                start_channel: 49,
+                values: [0, 200, 100, 255],
+                current_values: { 49: 0, 50: 200, 51: 100, 52: 255 },
+                channels: [
+                    { channel: 49, type: 'dimmer', name: 'Dimmer' },
+                    { channel: 50, type: 'red', name: 'Red' },
+                    { channel: 51, type: 'green', name: 'Green' },
+                    { channel: 52, type: 'blue', name: 'Blue' }
+                ]
+            },
+            {
+                id: 'demo-14',
+                name: 'Truss Back L',
+                device_type: 'spot_rgb',
+                universe: 1,
+                start_channel: 53,
+                values: [0, 100, 255, 200],
+                current_values: { 53: 0, 54: 100, 55: 255, 56: 200 },
+                channels: [
+                    { channel: 53, type: 'dimmer', name: 'Dimmer' },
+                    { channel: 54, type: 'red', name: 'Red' },
+                    { channel: 55, type: 'green', name: 'Green' },
+                    { channel: 56, type: 'blue', name: 'Blue' }
+                ]
+            },
+            {
+                id: 'demo-15',
+                name: 'Truss Back R',
+                device_type: 'spot_rgb',
+                universe: 1,
+                start_channel: 57,
+                values: [0, 200, 255, 100],
+                current_values: { 57: 0, 58: 200, 59: 255, 60: 100 },
+                channels: [
+                    { channel: 57, type: 'dimmer', name: 'Dimmer' },
+                    { channel: 58, type: 'red', name: 'Red' },
+                    { channel: 59, type: 'green', name: 'Green' },
+                    { channel: 60, type: 'blue', name: 'Blue' }
+                ]
+            }
+        ];
+
+        // Add demo devices to the device list
+        this.devices = [...demoDevices];
+
+        // Re-render devices and groups
+        this.renderDevices();
+        this.renderGroups();
+    }
+
+    removeDemoDevices() {
+        // Restore original devices
+        if (this.originalDevices) {
+            this.devices = [...this.originalDevices];
+            this.originalDevices = null;
+        }
+
+        // Re-render devices and groups
+        this.renderDevices();
+        this.renderGroups();
+    }
+
+    toggleStageBeams() {
+        this.showBeams = document.getElementById('showBeamsCheckbox').checked;
+    }
+
+    toggleStageGrid() {
+        this.showGrid = document.getElementById('showGridCheckbox').checked;
+    }
+
+    toggleStageLabels() {
+        this.showLabels = document.getElementById('showLabelsCheckbox').checked;
+    }
+
+    resetStageCamera() {
+        this.stageCamera = { x: 0, y: -5, z: 10, rotX: -30, rotY: 0 };
+    }
+
+    toggleStageFullscreen() {
+        const container = document.getElementById('stageCanvasContainer');
+        const icon = document.getElementById('fullscreenIcon');
+        const text = document.getElementById('fullscreenText');
+
+        if (!document.fullscreenElement) {
+            // Enter fullscreen
+            container.requestFullscreen().then(() => {
+                if (icon) icon.textContent = '⛶';
+                if (text) text.textContent = 'Vollbild beenden';
+                this.resizeStageCanvas();
+                this.setupFullscreenControls();
+            }).catch(err => {
+                console.error('Fullscreen error:', err);
+                // Fallback to CSS fullscreen
+                container.classList.add('fullscreen');
+                if (icon) icon.textContent = '⛶';
+                if (text) text.textContent = 'Vollbild beenden';
+                this.resizeStageCanvas();
+                this.setupFullscreenControls();
+            });
+        } else {
+            // Exit fullscreen
+            if (document.exitFullscreen) {
+                document.exitFullscreen().then(() => {
+                    if (icon) icon.textContent = '⛶';
+                    if (text) text.textContent = 'Vollbild';
+                    this.resizeStageCanvas();
+                    this.cleanupFullscreenControls();
+                });
+            } else {
+                // Fallback: remove CSS fullscreen class
+                container.classList.remove('fullscreen');
+                if (icon) icon.textContent = '⛶';
+                if (text) text.textContent = 'Vollbild';
+                this.resizeStageCanvas();
+                this.cleanupFullscreenControls();
+            }
+        }
+
+        // Listen for fullscreen changes (handles ESC key)
+        document.addEventListener('fullscreenchange', () => {
+            if (!document.fullscreenElement) {
+                if (icon) icon.textContent = '⛶';
+                if (text) text.textContent = 'Vollbild';
+                container.classList.remove('fullscreen');
+                this.resizeStageCanvas();
+                this.cleanupFullscreenControls();
+            }
+        }, { once: true });
+    }
+
+    setupFullscreenControls() {
+        const container = document.getElementById('stageCanvasContainer');
+        const overlay = document.getElementById('fullscreenControlsOverlay');
+
+        if (!container || !overlay) return;
+
+        // Auto-hide timeout
+        let hideTimeout;
+
+        // Show controls function
+        const showControls = () => {
+            overlay.classList.add('visible');
+            container.classList.remove('hide-cursor');
+
+            // Clear existing timeout
+            if (hideTimeout) {
+                clearTimeout(hideTimeout);
+            }
+
+            // Hide after 3 seconds of inactivity
+            hideTimeout = setTimeout(() => {
+                overlay.classList.remove('visible');
+                container.classList.add('hide-cursor');
+            }, 3000);
+        };
+
+        // Hide controls function
+        const hideControls = () => {
+            if (hideTimeout) {
+                clearTimeout(hideTimeout);
+            }
+            overlay.classList.remove('visible');
+            container.classList.add('hide-cursor');
+        };
+
+        // Mouse move handler
+        this.fullscreenMouseMove = (e) => {
+            // Show controls when mouse moves in upper 20% of screen or clicks anywhere
+            if (e.clientY < window.innerHeight * 0.2) {
+                showControls();
+            }
+        };
+
+        // Click/Touch handler for showing controls
+        this.fullscreenClick = (e) => {
+            // Don't show if clicking the exit button itself
+            if (e.target.closest('.btn-fullscreen-exit')) {
+                return;
+            }
+            showControls();
+        };
+
+        // Touch start handler for mobile
+        this.fullscreenTouchStart = (e) => {
+            const touch = e.touches[0];
+            if (touch.clientY < window.innerHeight * 0.2) {
+                showControls();
+            }
+        };
+
+        // Add event listeners
+        container.addEventListener('mousemove', this.fullscreenMouseMove);
+        container.addEventListener('click', this.fullscreenClick);
+        container.addEventListener('touchstart', this.fullscreenTouchStart);
+
+        // Show controls initially
+        showControls();
+    }
+
+    cleanupFullscreenControls() {
+        const container = document.getElementById('stageCanvasContainer');
+        const overlay = document.getElementById('fullscreenControlsOverlay');
+
+        if (!container || !overlay) return;
+
+        // Remove event listeners
+        if (this.fullscreenMouseMove) {
+            container.removeEventListener('mousemove', this.fullscreenMouseMove);
+        }
+        if (this.fullscreenClick) {
+            container.removeEventListener('click', this.fullscreenClick);
+        }
+        if (this.fullscreenTouchStart) {
+            container.removeEventListener('touchstart', this.fullscreenTouchStart);
+        }
+
+        // Hide overlay
+        overlay.classList.remove('visible');
+        container.classList.remove('hide-cursor');
+    }
+
+    // ===== Three.js 3D View =====
+    initThreeJS() {
+        if (this.threeInitialized || typeof THREE === 'undefined') {
+            console.log('Three.js already initialized or not loaded');
+            return;
+        }
+
+        const container = document.getElementById('stage3DContainer');
+        if (!container) {
+            console.error('3D container not found');
+            return;
+        }
+
+        console.log('Initializing Three.js, container size:', container.clientWidth, 'x', container.clientHeight);
+
+        // Scene setup
+        this.threeScene = new THREE.Scene();
+        this.threeScene.background = new THREE.Color(0x0a0e1a);
+        this.threeScene.fog = new THREE.Fog(0x0a0e1a, 20, 60);
+
+        // Camera setup - look at stage center
+        this.threeCamera = new THREE.PerspectiveCamera(
+            75,
+            container.clientWidth / container.clientHeight,
+            0.1,
+            1000
+        );
+        this.threeCamera.position.set(15, 10, 10);
+        this.threeCamera.lookAt(0, 3, -4); // Look at stage center
+
+        // Renderer setup
+        this.threeRenderer = new THREE.WebGLRenderer({ antialias: true });
+        this.threeRenderer.setSize(container.clientWidth, container.clientHeight);
+        this.threeRenderer.setPixelRatio(window.devicePixelRatio);
+        this.threeRenderer.shadowMap.enabled = true;
+        this.threeRenderer.shadowMap.type = THREE.PCFSoftShadowMap;
+        container.appendChild(this.threeRenderer.domElement);
+
+        // Lighting - brighter for better visibility
+        const ambientLight = new THREE.AmbientLight(0x606060, 1.0);
+        this.threeScene.add(ambientLight);
+
+        const mainLight = new THREE.DirectionalLight(0xffffff, 1.2);
+        mainLight.position.set(10, 20, 10);
+        mainLight.castShadow = true;
+        mainLight.shadow.mapSize.width = 2048;
+        mainLight.shadow.mapSize.height = 2048;
+        mainLight.shadow.camera.near = 0.5;
+        mainLight.shadow.camera.far = 500;
+        mainLight.shadow.camera.left = -30;
+        mainLight.shadow.camera.right = 30;
+        mainLight.shadow.camera.top = 30;
+        mainLight.shadow.camera.bottom = -30;
+        this.threeScene.add(mainLight);
+
+        // Add helper light from other side
+        const fillLight = new THREE.DirectionalLight(0x8080ff, 0.4);
+        fillLight.position.set(-10, 15, -10);
+        this.threeScene.add(fillLight);
+
+        // Add stage platform
+        this.createStagePlatform();
+
+        // Add grid helper at floor level
+        const gridHelper = new THREE.GridHelper(40, 40, 0x666666, 0x333333);
+        gridHelper.position.y = 0;
+        this.threeScene.add(gridHelper);
+
+        // Store spot meshes
+        this.threeSpotMeshes = [];
+
+        // Ensure spots are loaded before creating 3D models
+        if (this.stageSpots.length === 0) {
+            console.log('No spots available, updating spots...');
+            this.updateStageSpots();
+        }
+
+        // Create initial spots
+        console.log('Creating 3D spots, count:', this.stageSpots.length);
+        this.update3DSpots();
+
+        // Mouse controls for camera
+        this.setup3DControls();
+
+        // Handle resize
+        window.addEventListener('resize', () => {
+            if (this.stageView === '3d' && container.clientWidth > 0) {
+                this.threeCamera.aspect = container.clientWidth / container.clientHeight;
+                this.threeCamera.updateProjectionMatrix();
+                this.threeRenderer.setSize(container.clientWidth, container.clientHeight);
+            }
+        });
+
+        this.threeInitialized = true;
+
+        // Render once immediately to show scene
+        this.threeRenderer.render(this.threeScene, this.threeCamera);
+
+        // Start animation loop
+        this.animate3D();
+
+        console.log('Three.js initialization complete');
+    }
+
+    createStagePlatform() {
+        // Stage floor
+        const floorGeometry = new THREE.BoxGeometry(30, 0.5, 20);
+        const floorMaterial = new THREE.MeshStandardMaterial({
+            color: 0x1a1f2e,
+            roughness: 0.8,
+            metalness: 0.2
+        });
+        const floor = new THREE.Mesh(floorGeometry, floorMaterial);
+        floor.position.set(0, -0.25, -4);
+        floor.receiveShadow = true;
+        this.threeScene.add(floor);
+
+        // Stage edges (decorative)
+        const edgeMaterial = new THREE.MeshStandardMaterial({
+            color: 0x3b82f6,
+            emissive: 0x1e40af,
+            emissiveIntensity: 0.3
+        });
+
+        // Front edge
+        const frontEdge = new THREE.Mesh(
+            new THREE.BoxGeometry(30, 0.8, 0.2),
+            edgeMaterial
+        );
+        frontEdge.position.set(0, 0.15, 6);
+        this.threeScene.add(frontEdge);
+
+        // Truss structure (simplified)
+        const trussMaterial = new THREE.MeshStandardMaterial({
+            color: 0x444444,
+            metalness: 0.8,
+            roughness: 0.2
+        });
+
+        const trussGeometry = new THREE.CylinderGeometry(0.1, 0.1, 30, 8);
+        const truss1 = new THREE.Mesh(trussGeometry, trussMaterial);
+        truss1.rotation.z = Math.PI / 2;
+        truss1.position.set(0, 8, -4);
+        this.threeScene.add(truss1);
+    }
+
+    update3DSpots() {
+        if (!this.threeScene) {
+            console.warn('Cannot update 3D spots: scene not initialized');
+            return;
+        }
+
+        console.log('Updating 3D spots, count:', this.stageSpots.length);
+
+        // Remove old spot meshes and all children
+        this.threeSpotMeshes.forEach(mesh => {
+            // Remove light and target
+            if (mesh.light) {
+                if (mesh.light.target) this.threeScene.remove(mesh.light.target);
+                this.threeScene.remove(mesh.light);
+            }
+            // Remove group and all children
+            this.threeScene.remove(mesh);
+        });
+        this.threeSpotMeshes = [];
+
+        // Create new spot meshes with proper rotation
+        this.stageSpots.forEach((spot, index) => {
+            // Create group for spot (allows proper rotation)
+            const spotGroup = new THREE.Group();
+            spotGroup.position.set(spot.x, spot.y, spot.z);
+
+            // Spot body (cylinder)
+            const spotGeometry = new THREE.CylinderGeometry(0.4, 0.5, 1.2, 16);
+            const spotMaterial = new THREE.MeshStandardMaterial({
+                color: 0x444444,
+                metalness: 0.7,
+                roughness: 0.3,
+                emissive: 0x222222,
+                emissiveIntensity: 0.2
+            });
+            const spotMesh = new THREE.Mesh(spotGeometry, spotMaterial);
+            spotMesh.castShadow = true;
+            spotMesh.receiveShadow = true;
+            spotGroup.add(spotMesh);
+
+            // Lens at bottom
+            const lensGeometry = new THREE.SphereGeometry(0.25, 16, 16);
+            const lensMaterial = new THREE.MeshStandardMaterial({
+                color: 0x111111,
+                metalness: 0.9,
+                roughness: 0.1
+            });
+            const lens = new THREE.Mesh(lensGeometry, lensMaterial);
+            lens.position.y = -0.7;
+            spotGroup.add(lens);
+
+            // Apply pan/tilt rotation
+            const pan = (spot.pan || 0) * (Math.PI / 180);
+            const tilt = (spot.tilt || -45) * (Math.PI / 180);
+            spotGroup.rotation.y = pan;
+            spotGroup.rotation.x = tilt;
+
+            this.threeScene.add(spotGroup);
+
+            // SpotLight for directional lighting
+            const intensity = spot.intensity / 100;
+            if (intensity > 0.05) {
+                const color = new THREE.Color(
+                    spot.color[0] / 255,
+                    spot.color[1] / 255,
+                    spot.color[2] / 255
+                );
+
+                // Create spotlight
+                const spotLight = new THREE.SpotLight(color, intensity * 5, 20, Math.PI / 6, 0.3, 1);
+                spotLight.position.set(spot.x, spot.y - 0.7, spot.z);
+
+                // Calculate direction from pan/tilt
+                const direction = new THREE.Vector3(0, -1, 0);
+                direction.applyEuler(new THREE.Euler(tilt, pan, 0, 'YXZ'));
+                const targetPos = spotLight.position.clone().add(direction.multiplyScalar(10));
+
+                spotLight.target.position.copy(targetPos);
+                this.threeScene.add(spotLight.target);
+
+                spotLight.castShadow = true;
+                spotLight.shadow.mapSize.width = 1024;
+                spotLight.shadow.mapSize.height = 1024;
+
+                this.threeScene.add(spotLight);
+                spotGroup.light = spotLight;
+
+                // Lens emissive
+                lens.material.emissive = color;
+                lens.material.emissiveIntensity = intensity * 0.8;
+
+                // Light beam cone visualization
+                const coneGeom = new THREE.ConeGeometry(2, 8, 8, 1, true);
+                const coneMat = new THREE.MeshBasicMaterial({
+                    color: color,
+                    transparent: true,
+                    opacity: intensity * 0.15,
+                    side: THREE.DoubleSide
+                });
+                const lightCone = new THREE.Mesh(coneGeom, coneMat);
+                lightCone.position.y = -4.7;
+                lightCone.rotation.x = Math.PI;
+                spotGroup.add(lightCone);
+            }
+
+            this.threeSpotMeshes.push(spotGroup);
+        });
+
+        console.log('3D spots created:', this.threeSpotMeshes.length);
+    }
+
+    setup3DControls() {
+        const container = document.getElementById('stage3DContainer');
+        if (!container) return;
+
+        let isDragging = false;
+        let previousMousePosition = { x: 0, y: 0 };
+
+        container.addEventListener('mousedown', (e) => {
+            isDragging = true;
+            previousMousePosition = { x: e.clientX, y: e.clientY };
+        });
+
+        container.addEventListener('mousemove', (e) => {
+            if (!isDragging) return;
+
+            const deltaX = e.clientX - previousMousePosition.x;
+            const deltaY = e.clientY - previousMousePosition.y;
+
+            // Rotate camera around center
+            const rotationSpeed = 0.005;
+            const radius = Math.sqrt(
+                this.threeCamera.position.x ** 2 +
+                this.threeCamera.position.z ** 2
+            );
+
+            const angle = Math.atan2(this.threeCamera.position.z, this.threeCamera.position.x);
+            const newAngle = angle - deltaX * rotationSpeed;
+
+            this.threeCamera.position.x = radius * Math.cos(newAngle);
+            this.threeCamera.position.z = radius * Math.sin(newAngle);
+
+            this.threeCamera.position.y += -deltaY * 0.05;
+            this.threeCamera.position.y = Math.max(2, Math.min(20, this.threeCamera.position.y));
+
+            this.threeCamera.lookAt(0, 3, -4); // Look at stage center
+
+            previousMousePosition = { x: e.clientX, y: e.clientY };
+        });
+
+        container.addEventListener('mouseup', () => {
+            isDragging = false;
+        });
+
+        container.addEventListener('mouseleave', () => {
+            isDragging = false;
+        });
+
+        // Zoom with mouse wheel
+        container.addEventListener('wheel', (e) => {
+            e.preventDefault();
+            const zoomSpeed = 0.5;
+            const direction = e.deltaY > 0 ? 1 : -1;
+
+            const radius = Math.sqrt(
+                this.threeCamera.position.x ** 2 +
+                this.threeCamera.position.z ** 2
+            );
+
+            const newRadius = Math.max(5, Math.min(30, radius + direction * zoomSpeed));
+            const angle = Math.atan2(this.threeCamera.position.z, this.threeCamera.position.x);
+
+            this.threeCamera.position.x = newRadius * Math.cos(angle);
+            this.threeCamera.position.z = newRadius * Math.sin(angle);
+
+            this.threeCamera.lookAt(0, 3, -4); // Look at stage center
+        });
+    }
+
+    animate3D() {
+        if (!this.threeInitialized || !this.threeRenderer) return;
+
+        requestAnimationFrame(() => this.animate3D());
+
+        // Only render if in 3D view
+        if (this.stageView === '3d') {
+            // Update spot data
+            if (this.stageDemoMode) {
+                this.updateDemoSpots();
+            } else {
+                this.updateStageSpotData();
+            }
+
+            // Update 3D spot visuals
+            this.threeSpotMeshes.forEach((mesh, index) => {
+                const spot = this.stageSpots[index];
+                if (!spot) return;
+
+                const intensity = spot.intensity / 100;
+
+                // Update light
+                if (mesh.light) {
+                    const color = new THREE.Color(
+                        spot.color[0] / 255,
+                        spot.color[1] / 255,
+                        spot.color[2] / 255
+                    );
+                    mesh.light.color = color;
+                    mesh.light.intensity = intensity * 2;
+                } else if (intensity > 0.1) {
+                    // Create light if it doesn't exist
+                    const color = new THREE.Color(
+                        spot.color[0] / 255,
+                        spot.color[1] / 255,
+                        spot.color[2] / 255
+                    );
+                    const light = new THREE.PointLight(color, intensity * 2, 10);
+                    light.position.copy(mesh.position);
+                    light.position.y -= 0.5;
+                    light.castShadow = true;
+                    this.threeScene.add(light);
+                    mesh.light = light;
+                }
+
+                // Update emissive color
+                if (intensity > 0.05) {
+                    mesh.material.emissive = new THREE.Color(
+                        spot.color[0] / 255,
+                        spot.color[1] / 255,
+                        spot.color[2] / 255
+                    );
+                    mesh.material.emissiveIntensity = intensity * 0.5;
+                } else {
+                    mesh.material.emissiveIntensity = 0;
+                }
+
+                // Update lens emissive
+                if (mesh.lens && intensity > 0.05) {
+                    mesh.lens.material.emissive = new THREE.Color(
+                        spot.color[0] / 255,
+                        spot.color[1] / 255,
+                        spot.color[2] / 255
+                    );
+                    mesh.lens.material.emissiveIntensity = intensity * 0.8;
+                } else if (mesh.lens) {
+                    mesh.lens.material.emissiveIntensity = 0;
+                }
+            });
+
+            this.threeRenderer.render(this.threeScene, this.threeCamera);
+
+            // Update stats
+            if (Math.random() < 0.1) {
+                this.updateStageStats();
+            }
+        }
+    }
+
+    // ===== Truss Management =====
+    showTrussManager() {
+        this.loadTrusses();
+        this.renderTrussList();
+        document.getElementById('trussManagerModal').classList.add('active');
+    }
+
+    closeTrussManager() {
+        document.getElementById('trussManagerModal').classList.remove('active');
+    }
+
+    loadTrusses() {
+        // Load from localStorage
+        const saved = localStorage.getItem('stageTrusses');
+        if (saved) {
+            this.trusses = JSON.parse(saved);
+        } else {
+            // Create default truss
+            this.trusses = [
+                {
+                    id: 'truss-1',
+                    name: 'Front Traverse',
+                    x: 0,
+                    y: 6,
+                    z: -6,
+                    length: 12,
+                    rotation: 0
+                }
+            ];
+            this.saveTrusses();
+        }
+
+        // Load spot assignments
+        const assignments = localStorage.getItem('spotAssignments');
+        if (assignments) {
+            this.spotAssignments = JSON.parse(assignments);
+        }
+    }
+
+    saveTrusses() {
+        localStorage.setItem('stageTrusses', JSON.stringify(this.trusses));
+        localStorage.setItem('spotAssignments', JSON.stringify(this.spotAssignments));
+    }
+
+    renderTrussList() {
+        const container = document.getElementById('trussList');
+        if (!container) return;
+
+        if (this.trusses.length === 0) {
+            container.innerHTML = '<p style="color: var(--text-secondary);">Keine Traversen vorhanden</p>';
+            return;
+        }
+
+        container.innerHTML = this.trusses.map(truss => {
+            const spotCount = Object.values(this.spotAssignments).filter(a => a.trussId === truss.id).length;
+            const isSelected = this.currentTruss && this.currentTruss.id === truss.id;
+
+            return `
+                <div class="truss-item ${isSelected ? 'selected' : ''}" onclick="app.selectTruss('${truss.id}')">
+                    <div>
+                        <strong>${truss.name}</strong>
+                        <div style="font-size: 0.875rem; color: var(--text-secondary);">
+                            Position: (${truss.x}, ${truss.y}, ${truss.z}) | Länge: ${truss.length}m | ${spotCount} Spots
+                        </div>
+                    </div>
+                    <div style="display: flex; gap: 0.5rem;">
+                        <button class="btn btn-secondary btn-sm" onclick="event.stopPropagation(); app.editTruss('${truss.id}')">
+                            ✏️
+                        </button>
+                        <button class="btn btn-danger btn-sm" onclick="event.stopPropagation(); app.deleteTruss('${truss.id}')">
+                            🗑️
+                        </button>
+                    </div>
+                </div>
+            `;
+        }).join('');
+    }
+
+    selectTruss(trussId) {
+        this.currentTruss = this.trusses.find(t => t.id === trussId);
+        this.renderTrussList();
+        this.renderSpotAssignment();
+    }
+
+    renderSpotAssignment() {
+        const container = document.getElementById('spotAssignmentArea');
+        if (!container || !this.currentTruss) return;
+
+        const assignedSpots = Object.entries(this.spotAssignments)
+            .filter(([_, assignment]) => assignment.trussId === this.currentTruss.id)
+            .map(([spotId, _]) => this.devices.find(d => d.id === spotId))
+            .filter(d => d);
+
+        const availableSpots = this.devices.filter(d =>
+            !this.spotAssignments[d.id] || this.spotAssignments[d.id].trussId !== this.currentTruss.id
+        );
+
+        container.innerHTML = `
+            <h4>${this.currentTruss.name}</h4>
+            <div style="margin-bottom: 1rem;">
+                <label>Spot hinzufügen:</label>
+                <select id="spotToAdd" class="form-control">
+                    <option value="">-- Spot auswählen --</option>
+                    ${availableSpots.map(d => `<option value="${d.id}">${d.name}</option>`).join('')}
+                </select>
+                <button class="btn btn-primary btn-sm" onclick="app.addSpotToTruss()" style="margin-top: 0.5rem;">
+                    Spot hinzufügen
+                </button>
+            </div>
+
+            <h5>Zugeordnete Spots:</h5>
+            <div style="max-height: 300px; overflow-y: auto;">
+                ${assignedSpots.map(spot => {
+                    const assignment = this.spotAssignments[spot.id];
+                    return `
+                        <div class="spot-assignment-item">
+                            <div>
+                                <strong>${spot.name}</strong>
+                                <div style="font-size: 0.875rem; color: var(--text-secondary);">
+                                    Pos: ${assignment.position.toFixed(1)}m |
+                                    Tilt: ${assignment.tilt}° |
+                                    Pan: ${assignment.pan}°
+                                </div>
+                            </div>
+                            <div style="display: flex; gap: 0.5rem;">
+                                <button class="btn btn-secondary btn-sm" onclick="app.configureSpot('${spot.id}')">
+                                    ⚙️ Config
+                                </button>
+                                <button class="btn btn-danger btn-sm" onclick="app.removeSpotFromTruss('${spot.id}')">
+                                    ✖️
+                                </button>
+                            </div>
+                        </div>
+                    `;
+                }).join('') || '<p style="color: var(--text-secondary);">Keine Spots zugeordnet</p>'}
+            </div>
+        `;
+    }
+
+    showAddTruss() {
+        this.editingTruss = null;
+        document.getElementById('trussModalTitle').textContent = 'Traverse hinzufügen';
+        document.getElementById('trussName').value = '';
+        document.getElementById('trussX').value = '0';
+        document.getElementById('trussY').value = '6';
+        document.getElementById('trussZ').value = '-4';
+        document.getElementById('trussLength').value = '10';
+        document.getElementById('trussRotation').value = '0';
+        document.getElementById('addTrussModal').classList.add('active');
+    }
+
+    editTruss(trussId) {
+        this.editingTruss = this.trusses.find(t => t.id === trussId);
+        if (!this.editingTruss) return;
+
+        document.getElementById('trussModalTitle').textContent = 'Traverse bearbeiten';
+        document.getElementById('trussName').value = this.editingTruss.name;
+        document.getElementById('trussX').value = this.editingTruss.x;
+        document.getElementById('trussY').value = this.editingTruss.y;
+        document.getElementById('trussZ').value = this.editingTruss.z;
+        document.getElementById('trussLength').value = this.editingTruss.length;
+        document.getElementById('trussRotation').value = this.editingTruss.rotation;
+        document.getElementById('addTrussModal').classList.add('active');
+    }
+
+    closeAddTruss() {
+        document.getElementById('addTrussModal').classList.remove('active');
+        this.editingTruss = null;
+    }
+
+    saveTruss() {
+        const name = document.getElementById('trussName').value.trim();
+        const x = parseFloat(document.getElementById('trussX').value);
+        const y = parseFloat(document.getElementById('trussY').value);
+        const z = parseFloat(document.getElementById('trussZ').value);
+        const length = parseFloat(document.getElementById('trussLength').value);
+        const rotation = parseFloat(document.getElementById('trussRotation').value);
+
+        if (!name || length <= 0) {
+            this.showToast('Bitte alle Felder ausfüllen', 'error');
+            return;
+        }
+
+        if (this.editingTruss) {
+            // Update existing
+            this.editingTruss.name = name;
+            this.editingTruss.x = x;
+            this.editingTruss.y = y;
+            this.editingTruss.z = z;
+            this.editingTruss.length = length;
+            this.editingTruss.rotation = rotation;
+        } else {
+            // Create new
+            const newTruss = {
+                id: 'truss-' + Date.now(),
+                name,
+                x,
+                y,
+                z,
+                length,
+                rotation
+            };
+            this.trusses.push(newTruss);
+        }
+
+        this.saveTrusses();
+        this.closeAddTruss();
+        this.renderTrussList();
+        this.updateStageWithTrusses();
+        this.showToast('Traverse gespeichert', 'success');
+    }
+
+    deleteTruss(trussId) {
+        if (!confirm('Traverse wirklich löschen? Alle zugeordneten Spots werden entfernt.')) {
+            return;
+        }
+
+        // Remove truss
+        this.trusses = this.trusses.filter(t => t.id !== trussId);
+
+        // Remove spot assignments
+        Object.keys(this.spotAssignments).forEach(spotId => {
+            if (this.spotAssignments[spotId].trussId === trussId) {
+                delete this.spotAssignments[spotId];
+            }
+        });
+
+        this.saveTrusses();
+        this.renderTrussList();
+        this.updateStageWithTrusses();
+        this.showToast('Traverse gelöscht', 'success');
+    }
+
+    addSpotToTruss() {
+        const spotId = document.getElementById('spotToAdd').value;
+        if (!spotId || !this.currentTruss) return;
+
+        this.spotAssignments[spotId] = {
+            trussId: this.currentTruss.id,
+            position: 0, // Center of truss
+            pan: 0,
+            tilt: -45, // Default downward angle
+            targetX: 0,
+            targetY: 0,
+            targetZ: 0
+        };
+
+        this.saveTrusses();
+        this.renderSpotAssignment();
+        this.updateStageWithTrusses();
+        this.showToast('Spot hinzugefügt', 'success');
+    }
+
+    removeSpotFromTruss(spotId) {
+        delete this.spotAssignments[spotId];
+        this.saveTrusses();
+        this.renderSpotAssignment();
+        this.updateStageWithTrusses();
+        this.showToast('Spot entfernt', 'success');
+    }
+
+    configureSpot(spotId) {
+        this.editingSpot = spotId;
+        const assignment = this.spotAssignments[spotId];
+        const spot = this.devices.find(d => d.id === spotId);
+
+        if (!assignment || !spot) return;
+
+        document.getElementById('spotConfigTitle').textContent = `${spot.name} konfigurieren`;
+        document.getElementById('spotTrussPosition').value = assignment.position;
+        document.getElementById('spotTrussPositionValue').textContent = assignment.position.toFixed(1) + ' m';
+        document.getElementById('spotTilt').value = assignment.tilt;
+        document.getElementById('spotTiltValue').textContent = assignment.tilt + '°';
+        document.getElementById('spotPan').value = assignment.pan;
+        document.getElementById('spotPanValue').textContent = assignment.pan + '°';
+        document.getElementById('spotTargetX').value = assignment.targetX;
+        document.getElementById('spotTargetY').value = assignment.targetY;
+        document.getElementById('spotTargetZ').value = assignment.targetZ;
+
+        // Set max/min based on truss length
+        const truss = this.trusses.find(t => t.id === assignment.trussId);
+        if (truss) {
+            const halfLength = truss.length / 2;
+            document.getElementById('spotTrussPosition').min = -halfLength;
+            document.getElementById('spotTrussPosition').max = halfLength;
+        }
+
+        document.getElementById('spotConfigModal').classList.add('active');
+    }
+
+    closeSpotConfig() {
+        document.getElementById('spotConfigModal').classList.remove('active');
+        this.editingSpot = null;
+    }
+
+    updateSpotPositionPreview() {
+        const value = document.getElementById('spotTrussPosition').value;
+        document.getElementById('spotTrussPositionValue').textContent = parseFloat(value).toFixed(1) + ' m';
+    }
+
+    updateSpotTiltPreview() {
+        const value = document.getElementById('spotTilt').value;
+        document.getElementById('spotTiltValue').textContent = value + '°';
+    }
+
+    updateSpotPanPreview() {
+        const value = document.getElementById('spotPan').value;
+        document.getElementById('spotPanValue').textContent = value + '°';
+    }
+
+    autoAimSpot() {
+        if (!this.editingSpot) return;
+
+        const assignment = this.spotAssignments[this.editingSpot];
+        const truss = this.trusses.find(t => t.id === assignment.trussId);
+        if (!truss) return;
+
+        // Calculate spot world position
+        const radians = (truss.rotation * Math.PI) / 180;
+        const spotWorldX = truss.x + Math.cos(radians) * assignment.position;
+        const spotWorldZ = truss.z + Math.sin(radians) * assignment.position;
+        const spotWorldY = truss.y;
+
+        // Get target position
+        const targetX = parseFloat(document.getElementById('spotTargetX').value) || 0;
+        const targetY = parseFloat(document.getElementById('spotTargetY').value) || 0;
+        const targetZ = parseFloat(document.getElementById('spotTargetZ').value) || 0;
+
+        // Calculate direction vector
+        const dx = targetX - spotWorldX;
+        const dy = targetY - spotWorldY;
+        const dz = targetZ - spotWorldZ;
+
+        // Calculate pan (rotation around Y axis)
+        const pan = Math.atan2(dx, dz) * (180 / Math.PI);
+
+        // Calculate tilt (rotation around X axis)
+        const distXZ = Math.sqrt(dx * dx + dz * dz);
+        const tilt = -Math.atan2(dy, distXZ) * (180 / Math.PI);
+
+        // Update UI
+        document.getElementById('spotPan').value = Math.round(pan);
+        document.getElementById('spotTilt').value = Math.round(tilt);
+        this.updateSpotPanPreview();
+        this.updateSpotTiltPreview();
+
+        this.showToast('Spot automatisch ausgerichtet', 'success');
+    }
+
+    saveSpotConfig() {
+        if (!this.editingSpot) return;
+
+        const assignment = this.spotAssignments[this.editingSpot];
+        assignment.position = parseFloat(document.getElementById('spotTrussPosition').value);
+        assignment.tilt = parseInt(document.getElementById('spotTilt').value);
+        assignment.pan = parseInt(document.getElementById('spotPan').value);
+        assignment.targetX = parseFloat(document.getElementById('spotTargetX').value) || 0;
+        assignment.targetY = parseFloat(document.getElementById('spotTargetY').value) || 0;
+        assignment.targetZ = parseFloat(document.getElementById('spotTargetZ').value) || 0;
+
+        this.saveTrusses();
+        this.closeSpotConfig();
+        this.renderSpotAssignment();
+        this.updateStageWithTrusses();
+        this.showToast('Spot-Konfiguration gespeichert', 'success');
+    }
+
+    updateStageWithTrusses() {
+        // Update stage spots based on truss assignments
+        this.updateStageSpots();
+
+        // Update 3D if initialized
+        if (this.threeInitialized) {
+            this.rebuild3DScene();
+        }
+    }
+
+    rebuild3DScene() {
+        if (!this.threeScene) return;
+
+        // Remove old trusses and spots
+        if (this.threeTrussMeshes) {
+            this.threeTrussMeshes.forEach(mesh => this.threeScene.remove(mesh));
+        }
+        this.threeTrussMeshes = [];
+
+        // Create new trusses and spots
+        this.create3DTrusses();
+        this.update3DSpots();
+    }
+
+    create3DTrusses() {
+        if (!this.threeScene) return;
+
+        this.threeTrussMeshes = [];
+
+        this.trusses.forEach(truss => {
+            // Truss structure
+            const trussGeometry = new THREE.CylinderGeometry(0.15, 0.15, truss.length, 8);
+            const trussMaterial = new THREE.MeshStandardMaterial({
+                color: 0x555555,
+                metalness: 0.8,
+                roughness: 0.2
+            });
+            const trussMesh = new THREE.Mesh(trussGeometry, trussMaterial);
+
+            // Position and rotate
+            trussMesh.position.set(truss.x, truss.y, truss.z);
+            trussMesh.rotation.y = (truss.rotation * Math.PI) / 180;
+            trussMesh.rotation.z = Math.PI / 2; // Horizontal
+
+            trussMesh.castShadow = true;
+            trussMesh.receiveShadow = true;
+
+            this.threeScene.add(trussMesh);
+            this.threeTrussMeshes.push(trussMesh);
+        });
     }
 }
 

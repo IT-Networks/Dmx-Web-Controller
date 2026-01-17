@@ -7,6 +7,8 @@
     <meta name="msapplication-tap-highlight" content="no">
     <title>DMX Web Controller Pro</title>
     <link rel="stylesheet" href="./style.css">
+    <!-- Three.js for 3D rendering -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 </head>
 <body>
     <div class="app">
@@ -63,6 +65,19 @@
                         <rect x="14" y="6" width="4" height="8" fill="currentColor"/>
                     </svg>
                     <span>Timeline</span>
+                </button>
+
+                <button class="menu-item" data-tab="stage" onclick="app.switchTab('stage')">
+                    <svg width="20" height="20" viewBox="0 0 20 20">
+                        <path d="M2 14 L2 18 L18 18 L18 14 Z" fill="currentColor" opacity="0.3"/>
+                        <circle cx="5" cy="8" r="1.5" fill="currentColor"/>
+                        <path d="M5 8 L4 14" stroke="currentColor" stroke-width="1.5" opacity="0.6"/>
+                        <circle cx="10" cy="6" r="1.5" fill="currentColor"/>
+                        <path d="M10 6 L10 14" stroke="currentColor" stroke-width="1.5" opacity="0.6"/>
+                        <circle cx="15" cy="8" r="1.5" fill="currentColor"/>
+                        <path d="M15 8 L16 14" stroke="currentColor" stroke-width="1.5" opacity="0.6"/>
+                    </svg>
+                    <span>Bühne</span>
                 </button>
 
                 <button class="menu-item" data-tab="settings" onclick="app.switchTab('settings')">
@@ -299,6 +314,154 @@
                             <div class="info-row">
                                 <span>Platform:</span>
                                 <strong id="platformInfo">Web</strong>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="tab-content" id="stageTab">
+                <div class="stage-visualizer">
+                    <!-- Controls Bar -->
+                    <div class="stage-controls">
+                        <div class="stage-control-group">
+                            <label>Ansicht:</label>
+                            <div class="button-group">
+                                <button class="btn-option active" data-view="perspective" onclick="app.setStageView('perspective')">
+                                    <span>🎭 Perspektive</span>
+                                </button>
+                                <button class="btn-option" data-view="top" onclick="app.setStageView('top')">
+                                    <span>⬇️ Draufsicht</span>
+                                </button>
+                                <button class="btn-option" data-view="front" onclick="app.setStageView('front')">
+                                    <span>👁️ Frontal</span>
+                                </button>
+                                <button class="btn-option" data-view="3d" onclick="app.setStageView('3d')">
+                                    <span>🎲 3D</span>
+                                </button>
+                            </div>
+                        </div>
+
+                        <div class="stage-control-group">
+                            <label>Modus:</label>
+                            <div class="button-group">
+                                <button class="btn-option" id="stageDemoModeBtn" data-mode="demo" onclick="app.toggleStageDemoMode()">
+                                    <span>🎪 Demo</span>
+                                </button>
+                                <button class="btn-option active" id="stageLiveModeBtn" data-mode="live" onclick="app.toggleStageDemoMode()">
+                                    <span>🔴 Live</span>
+                                </button>
+                            </div>
+                        </div>
+
+                        <div class="stage-control-group">
+                            <label>Optionen:</label>
+                            <label class="checkbox-label">
+                                <input type="checkbox" id="showBeamsCheckbox" checked onchange="app.toggleStageBeams()">
+                                <span>Licht-Strahlen</span>
+                            </label>
+                            <label class="checkbox-label">
+                                <input type="checkbox" id="showGridCheckbox" checked onchange="app.toggleStageGrid()">
+                                <span>Raster</span>
+                            </label>
+                            <label class="checkbox-label">
+                                <input type="checkbox" id="showLabelsCheckbox" checked onchange="app.toggleStageLabels()">
+                                <span>Beschriftung</span>
+                            </label>
+                        </div>
+
+                        <div class="stage-control-group">
+                            <button class="btn btn-secondary btn-sm" onclick="app.resetStageCamera()">
+                                <span>📷 Kamera zurücksetzen</span>
+                            </button>
+                            <button class="btn btn-primary btn-sm" onclick="app.showTrussManager()">
+                                <span>🏗️ Traversen</span>
+                            </button>
+                            <button class="btn btn-secondary btn-sm" id="fullscreenBtn" onclick="app.toggleStageFullscreen()">
+                                <span id="fullscreenIcon">⛶</span> <span id="fullscreenText">Vollbild</span>
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Stage Canvas -->
+                    <div class="stage-canvas-container" id="stageCanvasContainer">
+                        <canvas id="stageCanvas"></canvas>
+
+                        <!-- Three.js 3D Container -->
+                        <div id="stage3DContainer" style="display: none; position: absolute; top: 0; left: 0; width: 100%; height: 100%;"></div>
+
+                        <!-- Stage Info Overlay -->
+                        <div class="stage-info-overlay">
+                            <div class="stage-stats">
+                                <div class="stat-item">
+                                    <span class="stat-label">Spots aktiv:</span>
+                                    <span class="stat-value" id="stageActiveSpots">0</span>
+                                </div>
+                                <div class="stat-item">
+                                    <span class="stat-label">Gesamt-Leistung:</span>
+                                    <span class="stat-value" id="stageTotalPower">0W</span>
+                                </div>
+                                <div class="stat-item">
+                                    <span class="stat-label">FPS:</span>
+                                    <span class="stat-value" id="stageFPS">60</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Spot Details Popup (shown on hover) -->
+                        <div class="spot-details-popup" id="spotDetailsPopup" style="display: none;">
+                            <div class="spot-detail-header">
+                                <strong id="spotDetailName">Spot 1</strong>
+                            </div>
+                            <div class="spot-detail-body">
+                                <div class="spot-detail-row">
+                                    <span>Position:</span>
+                                    <span id="spotDetailPosition">X:0 Y:0 Z:0</span>
+                                </div>
+                                <div class="spot-detail-row">
+                                    <span>Farbe:</span>
+                                    <div class="spot-detail-color" id="spotDetailColor"></div>
+                                </div>
+                                <div class="spot-detail-row">
+                                    <span>Intensität:</span>
+                                    <span id="spotDetailIntensity">0%</span>
+                                </div>
+                                <div class="spot-detail-row">
+                                    <span>DMX:</span>
+                                    <span id="spotDetailDMX">Ch 1-6</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Fullscreen Controls (auto-hide) -->
+                        <div class="fullscreen-controls-overlay" id="fullscreenControlsOverlay" style="display: none;">
+                            <div class="fullscreen-controls-bar">
+                                <div class="fullscreen-title">Bühnen-Visualisierung</div>
+                                <button class="btn-fullscreen-exit" id="btnFullscreenExit" onclick="app.toggleStageFullscreen()">
+                                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                        <path d="M8 3v3a2 2 0 0 1-2 2H3m18 0h-3a2 2 0 0 1-2-2V3m0 18v-3a2 2 0 0 1 2-2h3M3 16h3a2 2 0 0 1 2 2v3"/>
+                                    </svg>
+                                    <span>Vollbild beenden</span>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Legend -->
+                    <div class="stage-legend">
+                        <h4>Legende</h4>
+                        <div class="legend-items">
+                            <div class="legend-item">
+                                <div class="legend-icon spot-on"></div>
+                                <span>Spot aktiv</span>
+                            </div>
+                            <div class="legend-item">
+                                <div class="legend-icon spot-off"></div>
+                                <span>Spot aus</span>
+                            </div>
+                            <div class="legend-item">
+                                <div class="legend-icon spot-selected"></div>
+                                <span>Ausgewählt</span>
                             </div>
                         </div>
                     </div>
@@ -856,6 +1019,135 @@
 
     <!-- Toast Container -->
     <div class="toast-container" id="toastContainer"></div>
+
+    <!-- Truss Manager Modal -->
+    <div class="modal" id="trussManagerModal">
+        <div class="modal-content truss-modal-content">
+            <div class="modal-header">
+                <h2>🏗️ Traversen-Verwaltung</h2>
+                <button class="btn-close" onclick="app.closeTrussManager()">×</button>
+            </div>
+            <div class="modal-body">
+                <div class="truss-manager-grid">
+                    <!-- Truss List -->
+                    <div class="truss-section">
+                        <div class="section-header">
+                            <h3>Traversen</h3>
+                            <button class="btn btn-primary btn-sm" onclick="app.showAddTruss()">
+                                + Hinzufügen
+                            </button>
+                        </div>
+                        <div id="trussList" class="truss-list-container">
+                            <!-- Truss items will be rendered here -->
+                        </div>
+                    </div>
+
+                    <!-- Spot Assignment -->
+                    <div class="truss-section">
+                        <h3>Spots zuordnen</h3>
+                        <div id="spotAssignmentArea" class="spot-assignment-container">
+                            <p style="color: var(--text-secondary); text-align: center; padding: 2rem;">Wähle eine Traverse aus, um Spots zuzuordnen</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Add/Edit Truss Modal -->
+    <div class="modal" id="addTrussModal">
+        <div class="modal-backdrop" onclick="app.closeAddTruss()"></div>
+        <div class="modal-dialog">
+            <div class="modal-header">
+                <h2 id="trussModalTitle">Traverse hinzufügen</h2>
+                <button class="modal-close" onclick="app.closeAddTruss()">×</button>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label>Name</label>
+                    <input type="text" id="trussName" class="input" placeholder="z.B. Front Traverse">
+                </div>
+
+                <div class="form-section">
+                    <h4>Position</h4>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label>X (Links/Rechts)</label>
+                            <input type="number" id="trussX" class="input" value="0" step="0.5">
+                        </div>
+                        <div class="form-group">
+                            <label>Y (Höhe)</label>
+                            <input type="number" id="trussY" class="input" value="4" step="0.5">
+                        </div>
+                        <div class="form-group">
+                            <label>Z (Vorne/Hinten)</label>
+                            <input type="number" id="trussZ" class="input" value="-4" step="0.5">
+                        </div>
+                    </div>
+                </div>
+
+                <div class="form-section">
+                    <h4>Abmessungen</h4>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label>Länge (m)</label>
+                            <input type="number" id="trussLength" class="input" value="10" step="0.5" min="1">
+                        </div>
+                        <div class="form-group">
+                            <label>Rotation (°)</label>
+                            <input type="number" id="trussRotation" class="input" value="90" step="15" min="0" max="360">
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="app.closeAddTruss()">Abbrechen</button>
+                <button class="btn btn-primary" onclick="app.saveTruss()">Speichern</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Spot Configuration Modal -->
+    <div class="modal" id="spotConfigModal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2 id="spotConfigTitle">Spot konfigurieren</h2>
+                <button class="btn-close" onclick="app.closeSpotConfig()">×</button>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label>Position auf Traverse (m):</label>
+                    <input type="range" id="spotTrussPosition" min="-5" max="5" step="0.1" value="0" oninput="app.updateSpotPositionPreview()">
+                    <span id="spotTrussPositionValue">0 m</span>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>Neigung (Tilt °):</label>
+                        <input type="range" id="spotTilt" min="-90" max="90" step="5" value="-45" oninput="app.updateSpotTiltPreview()">
+                        <span id="spotTiltValue">-45°</span>
+                    </div>
+                    <div class="form-group">
+                        <label>Drehung (Pan °):</label>
+                        <input type="range" id="spotPan" min="-180" max="180" step="5" value="0" oninput="app.updateSpotPanPreview()">
+                        <span id="spotPanValue">0°</span>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label>Fokuspunkt (Ziel):</label>
+                    <div class="form-row">
+                        <input type="number" id="spotTargetX" placeholder="X" step="0.5" value="0">
+                        <input type="number" id="spotTargetY" placeholder="Y" step="0.5" value="0">
+                        <input type="number" id="spotTargetZ" placeholder="Z" step="0.5" value="0">
+                        <button class="btn btn-secondary btn-sm" onclick="app.autoAimSpot()">Auto-Ausrichten</button>
+                    </div>
+                </div>
+                <div class="modal-actions">
+                    <button class="btn btn-secondary" onclick="app.closeSpotConfig()">Abbrechen</button>
+                    <button class="btn btn-primary" onclick="app.saveSpotConfig()">Speichern</button>
+                </div>
+            </div>
+        </div>
+    </div>
 
     <script src="./audioAnalyzer.js"></script>
     <script src="./app.js"></script>
