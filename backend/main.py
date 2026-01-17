@@ -114,6 +114,8 @@ current_audio_data: Dict[str, float] = {  # Current audio levels from clients
 # DMX Performance Optimization - Channel Cache per device
 dmx_channel_cache: Dict[str, List[int]] = {}  # device_id -> last sent channel values
 last_save_time = time.time()  # For auto-save debouncing
+save_devices_pending = False  # Flag for pending save operations
+SAVE_DEBOUNCE_INTERVAL = 2.0  # seconds
 
 
 class ArtNetController:
@@ -392,6 +394,22 @@ def save_devices():
         return False
 
 
+async def schedule_save_devices():
+    """Schedule a debounced save operation for devices"""
+    global save_devices_pending, last_save_time
+
+    # Mark that a save is pending
+    save_devices_pending = True
+
+    # Wait for debounce interval
+    await asyncio.sleep(SAVE_DEBOUNCE_INTERVAL)
+
+    # Check if still pending (might have been saved by another operation)
+    if save_devices_pending:
+        save_devices()
+        save_devices_pending = False
+
+
 def save_scenes():
     """Speichert Szenen mit atomic write und backup"""
     try:
@@ -449,24 +467,38 @@ def send_device_dmx(device) -> bool:
             logger.warning("Device without ID, cannot cache")
             return False
 
+        device_values = device.get('values', [])
+        start_ch = device['start_channel'] - 1
+        channel_count = len(device_values)
+
+        # Build channels array
         channels = [0] * 512
-        for i, val in enumerate(device.get('values', [])):
-            ch = device['start_channel'] - 1 + i
+        for i, val in enumerate(device_values):
+            ch = start_ch + i
             if 0 <= ch < 512:
                 channels[ch] = max(0, min(255, int(val)))  # Clamp values
 
-        # Check cache - only send if values changed
+        # Optimized cache check - only compare relevant channels
         if device_id in dmx_channel_cache:
-            if dmx_channel_cache[device_id] == channels:
-                logger.debug(f"DMX cache hit for {device.get('name')}, skipping send")
-                return True  # Values unchanged, skip send
+            cached_channels = dmx_channel_cache[device_id]
+            # Only compare the channels actually used by this device
+            channels_changed = False
+            for i in range(channel_count):
+                ch = start_ch + i
+                if 0 <= ch < 512 and cached_channels[ch] != channels[ch]:
+                    channels_changed = True
+                    break
+
+            if not channels_changed:
+                # Values unchanged, skip send
+                return True
 
         # Send DMX
         success = controller.send_dmx(device['ip'], device['universe'], channels)
 
         # Update cache on successful send
         if success:
-            dmx_channel_cache[device_id] = channels.copy()
+            dmx_channel_cache[device_id] = channels
 
         return success
 
@@ -1659,20 +1691,25 @@ async def delete_device(device_id: str):
 async def update_device_values(device_id: str, data: dict):
     """Aktualisiert Gerätewerte"""
     device = next((d for d in devices if d.get('id') == device_id), None)
-    
+
     if device:
         device['values'] = data['values']
-        send_device_dmx(device)
-        save_devices()
-        
+
+        # Send DMX in background (non-blocking)
+        asyncio.create_task(asyncio.to_thread(send_device_dmx, device))
+
+        # Schedule debounced save
+        if not save_devices_pending:
+            asyncio.create_task(schedule_save_devices())
+
         await broadcast_update({
             'type': 'device_values_updated',
             'device_id': device_id,
             'values': data['values']
         })
-        
+
         return {"success": True}
-    
+
     return {"success": False}
 
 
@@ -2115,17 +2152,22 @@ async def websocket_endpoint(websocket: WebSocket):
     try:
         while True:
             data = await websocket.receive_json()
-            
+
             if data['type'] == 'update_device_value':
                 device = next((d for d in devices if d.get('id') == data['device_id']), None)
                 if device:
                     channel_idx = data['channel_idx']
                     value = data['value']
                     device['values'][channel_idx] = value
-                    send_device_dmx(device)
-                    save_devices()
 
-                    # Broadcast an alle anderen Clients
+                    # Send DMX immediately in background (non-blocking)
+                    asyncio.create_task(asyncio.to_thread(send_device_dmx, device))
+
+                    # Schedule debounced save (don't block on I/O)
+                    if not save_devices_pending:
+                        asyncio.create_task(schedule_save_devices())
+
+                    # Broadcast to other clients (skip sender)
                     await broadcast_update({
                         'type': 'device_values_updated',
                         'device_id': data['device_id'],
@@ -2142,7 +2184,7 @@ async def websocket_endpoint(websocket: WebSocket):
                     'overall': audio_info.get('overall', 0.0),
                     'peak': audio_info.get('peak', 0)
                 })
-    
+
     except WebSocketDisconnect:
         connected_clients.remove(websocket)
 
