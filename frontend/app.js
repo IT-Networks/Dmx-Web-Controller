@@ -21,10 +21,10 @@ class DMXController {
         this.serverUrl = this.getServerUrl();
         this.wsUrl = this.getWebSocketUrl();
 
-        // DMX update throttling
-        this.dmxUpdateQueue = new Map(); // deviceId -> {channelIdx, value, timestamp}
-        this.dmxUpdateTimer = null;
-        this.DMX_UPDATE_INTERVAL = 30; // ms between updates (33fps)
+        // DMX update throttling with immediate first send
+        this.dmxUpdateQueue = new Map(); // key -> {deviceId, channelIdx, value}
+        this.dmxSendPending = false;
+        this.DMX_UPDATE_INTERVAL = 16; // ms between batches (~60fps)
 
         // Truss system
         this.trusses = [];
@@ -439,30 +439,28 @@ class DMXController {
     }
     
     updateDeviceValue(deviceId, channelIdx, value) {
-        // Queue the update instead of sending immediately
         const key = `${deviceId}-${channelIdx}`;
+
+        // Update queue with latest value
         this.dmxUpdateQueue.set(key, {
             deviceId,
             channelIdx,
-            value: parseInt(value),
-            timestamp: Date.now()
+            value: parseInt(value)
         });
 
-        // Start processing queue if not already running
-        if (!this.dmxUpdateTimer) {
-            this.processDMXUpdateQueue();
+        // Schedule send on next animation frame (60fps smooth updates)
+        if (!this.dmxSendPending) {
+            this.dmxSendPending = true;
+            requestAnimationFrame(() => this.processDMXUpdateQueue());
         }
     }
 
     processDMXUpdateQueue() {
-        if (this.dmxUpdateQueue.size === 0) {
-            this.dmxUpdateTimer = null;
-            return;
-        }
+        this.dmxSendPending = false;
 
-        if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-            // Send all queued updates
-            this.dmxUpdateQueue.forEach((update, key) => {
+        // Send all queued updates
+        if (this.dmxUpdateQueue.size > 0 && this.ws && this.ws.readyState === WebSocket.OPEN) {
+            this.dmxUpdateQueue.forEach((update) => {
                 this.ws.send(JSON.stringify({
                     type: 'update_device_value',
                     device_id: update.deviceId,
@@ -471,14 +469,9 @@ class DMXController {
                 }));
             });
 
-            // Clear the queue
+            // Clear queue after sending
             this.dmxUpdateQueue.clear();
         }
-
-        // Schedule next batch
-        this.dmxUpdateTimer = setTimeout(() => {
-            this.processDMXUpdateQueue();
-        }, this.DMX_UPDATE_INTERVAL);
     }
     
     renderDevices() {
