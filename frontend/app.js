@@ -264,8 +264,19 @@ class DMXController {
         const universe = parseInt(document.getElementById('deviceUniverse').value);
         const startChannel = parseInt(document.getElementById('deviceChannel').value);
 
+        // Validate all required fields
         if (!name || !ip) {
-            this.showToast('Bitte alle Felder ausfüllen', 'error');
+            this.showToast('Bitte Name und IP-Adresse eingeben', 'error');
+            return;
+        }
+
+        if (isNaN(universe) || universe < 0 || universe > 15) {
+            this.showToast('Bitte gültige Universe (0-15) eingeben', 'error');
+            return;
+        }
+
+        if (isNaN(startChannel) || startChannel < 1 || startChannel > 512) {
+            this.showToast('Bitte gültigen Start-Kanal (1-512) eingeben', 'error');
             return;
         }
 
@@ -288,6 +299,13 @@ class DMXController {
             device.device_type = this.selectedDeviceType;
         }
 
+        // Final validation: ensure channel_count and device_type are set
+        if (!device.channel_count || !device.device_type) {
+            this.showToast('Fehler: Gerätetyp nicht korrekt gesetzt', 'error');
+            console.error('Missing device data:', device);
+            return;
+        }
+
         try {
             const response = await fetch('/api/devices', {
                 method: 'POST',
@@ -306,10 +324,29 @@ class DMXController {
                 this.selectedFixture = null;
                 document.getElementById('manualTypeGroup').style.display = 'block';
                 document.getElementById('fixtureInfo').style.display = 'none';
+            } else {
+                // Handle HTTP errors
+                let errorMsg = 'Fehler beim Hinzufügen';
+                try {
+                    const errorData = await response.json();
+                    if (errorData.detail) {
+                        if (typeof errorData.detail === 'string') {
+                            errorMsg = errorData.detail;
+                        } else if (Array.isArray(errorData.detail)) {
+                            // Pydantic validation errors
+                            const errors = errorData.detail.map(e => `${e.loc.join('.')}: ${e.msg}`).join(', ');
+                            errorMsg = `Validierungsfehler: ${errors}`;
+                        }
+                    }
+                } catch (e) {
+                    errorMsg = `HTTP ${response.status}: ${response.statusText}`;
+                }
+                console.error('Server error:', errorMsg);
+                this.showToast(errorMsg, 'error');
             }
         } catch (error) {
             console.error('Error adding device:', error);
-            this.showToast('Fehler beim Hinzufügen', 'error');
+            this.showToast('Netzwerkfehler beim Hinzufügen', 'error');
         }
     }
     
