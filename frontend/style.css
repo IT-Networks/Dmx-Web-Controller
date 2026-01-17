@@ -2373,3 +2373,50 @@ canvas {
         transform: rotate(360deg);
     }
 }
+
+/* Interface Details */
+.interface-details {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: 0.75rem;
+    margin-top: 1rem;
+    padding-top: 1rem;
+    border-top: 1px solid var(--border-color);
+}
+
+.detail-item {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+}
+
+.detail-label {
+    font-size: 0.75rem;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.detail-value {
+    font-size: 0.875rem;
+    color: var(--text-primary);
+    font-weight: 500;
+}
+
+.detail-value.status-online {
+    color: var(--success);
+}
+
+.detail-value.status-offline {
+    color: var(--danger);
+}
+
+.detail-value.status-unknown {
+    color: var(--text-secondary);
+}
+
+.device-description {
+    font-size: 0.75rem;
+    color: var(--text-secondary);
+    margin-top: 0.25rem;
+}
