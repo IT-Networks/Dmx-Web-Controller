@@ -1450,6 +1450,119 @@ async def get_devices():
     return {"devices": devices}
 
 
+@app.get("/api/artnet/discover")
+async def discover_artnet_devices():
+    """Scannt das Netzwerk nach Art-Net-Geräten"""
+    try:
+        discovered_nodes = []
+
+        # Create UDP socket
+        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+        sock.settimeout(3.0)  # 3 seconds timeout
+
+        # Art-Net OpPoll packet (14 bytes)
+        # Header: "Art-Net\0" (8 bytes)
+        # OpCode: 0x2000 (OpPoll, little-endian)
+        # ProtVer: 14 (Art-Net version)
+        # Flags: 0x06 (reply when conditions change + diagnostics)
+        # DiagPriority: 0
+        artpoll_packet = b'Art-Net\x00'  # Header
+        artpoll_packet += struct.pack('<H', 0x2000)  # OpPoll
+        artpoll_packet += struct.pack('>H', 14)  # ProtVer (big-endian)
+        artpoll_packet += struct.pack('BB', 0x06, 0x00)  # Flags, DiagPriority
+
+        # Send ArtPoll to broadcast
+        broadcast_address = ('255.255.255.255', 6454)
+        sock.sendto(artpoll_packet, broadcast_address)
+
+        logger.info("Sent Art-Net Poll packet")
+
+        # Collect responses for 3 seconds
+        start_time = time.time()
+        seen_ips = set()
+
+        while time.time() - start_time < 3.0:
+            try:
+                data, addr = sock.recvfrom(1024)
+                ip = addr[0]
+
+                # Skip if we've already seen this IP
+                if ip in seen_ips:
+                    continue
+                seen_ips.add(ip)
+
+                # Check if it's an ArtPollReply (OpCode 0x2100)
+                if len(data) >= 10 and data[0:8] == b'Art-Net\x00':
+                    opcode = struct.unpack('<H', data[8:10])[0]
+
+                    if opcode == 0x2100:  # ArtPollReply
+                        try:
+                            # Parse ArtPollReply packet
+                            # Bytes 10-13: IP address (4 bytes)
+                            # Bytes 18-19: Port number
+                            # Bytes 26-43: Short name (18 bytes, null-terminated)
+                            # Bytes 44-107: Long name (64 bytes, null-terminated)
+                            # Bytes 173: Number of ports
+                            # Bytes 190-193: Bind IP
+
+                            node_ip = '.'.join(str(b) for b in data[10:14])
+                            port = struct.unpack('>H', data[18:20])[0]
+
+                            # Extract short name
+                            short_name = data[26:44].split(b'\x00')[0].decode('ascii', errors='ignore')
+
+                            # Extract long name
+                            long_name = data[44:108].split(b'\x00')[0].decode('ascii', errors='ignore')
+
+                            # Number of ports
+                            num_ports = data[173] if len(data) > 173 else 1
+
+                            node_info = {
+                                'ip': node_ip,
+                                'port': port,
+                                'short_name': short_name or 'Art-Net Node',
+                                'long_name': long_name or 'Unknown Device',
+                                'num_ports': num_ports,
+                                'source_ip': ip  # The actual IP we received from
+                            }
+
+                            discovered_nodes.append(node_info)
+                            logger.info(f"Found Art-Net node: {short_name} at {ip}")
+
+                        except Exception as e:
+                            logger.error(f"Error parsing ArtPollReply from {ip}: {e}")
+                            # Add basic info even if parsing failed
+                            discovered_nodes.append({
+                                'ip': ip,
+                                'port': 6454,
+                                'short_name': 'Art-Net Node',
+                                'long_name': 'Unknown Device',
+                                'num_ports': 1,
+                                'source_ip': ip
+                            })
+
+            except socket.timeout:
+                break
+            except Exception as e:
+                logger.error(f"Error receiving Art-Net response: {e}")
+                break
+
+        sock.close()
+
+        logger.info(f"Discovery complete. Found {len(discovered_nodes)} Art-Net nodes")
+
+        return {
+            'success': True,
+            'nodes': discovered_nodes,
+            'count': len(discovered_nodes)
+        }
+
+    except Exception as e:
+        logger.error(f"Error during Art-Net discovery: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Discovery failed: {str(e)}")
+
+
 @app.post("/api/devices")
 async def add_device(device_data: DeviceCreate):
     """Fügt neues Gerät hinzu mit Validation"""
