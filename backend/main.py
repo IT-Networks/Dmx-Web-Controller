@@ -111,8 +111,9 @@ current_audio_data: Dict[str, float] = {  # Current audio levels from clients
     'overall': 0.0,
     'peak': 0
 }
-# DMX Performance Optimization - Channel Cache per device
-dmx_channel_cache: Dict[str, List[int]] = {}  # device_id -> last sent channel values
+# DMX Performance Optimization - Universe-based state management
+# Key: (ip, universe) -> [512 channel values]
+dmx_universe_state: Dict[tuple, List[int]] = {}
 last_save_time = time.time()  # For auto-save debouncing
 save_devices_pending = False  # Flag for pending save operations
 SAVE_DEBOUNCE_INTERVAL = 2.0  # seconds
@@ -458,52 +459,58 @@ def save_sequences():
         return False
 
 
-# DMX Senden mit Performance-Optimierung
+# DMX Senden mit Universe-basierter State-Verwaltung
 def send_device_dmx(device) -> bool:
-    """Sendet DMX für ein Gerät mit Channel-Caching"""
+    """
+    Aktualisiert DMX-Universe mit Gerätewerten und sendet das komplette Universe.
+    Jedes Universe behält seinen State, sodass Geräte sich nicht gegenseitig überschreiben.
+    """
     try:
-        device_id = device.get('id')
-        if not device_id:
-            logger.warning("Device without ID, cannot cache")
-            return False
-
+        device_ip = device.get('ip')
+        device_universe = device.get('universe')
         device_values = device.get('values', [])
         start_ch = device['start_channel'] - 1
-        channel_count = len(device_values)
 
-        # Build channels array
-        channels = [0] * 512
+        if not device_ip or device_universe is None:
+            logger.warning(f"Device {device.get('name')} missing IP or universe")
+            return False
+
+        # Universe key (ip, universe)
+        universe_key = (device_ip, device_universe)
+
+        # Initialize universe state if it doesn't exist
+        if universe_key not in dmx_universe_state:
+            dmx_universe_state[universe_key] = [0] * 512
+            logger.info(f"Initialized DMX universe state for {device_ip} universe {device_universe}")
+
+        # Get current universe state
+        universe_channels = dmx_universe_state[universe_key]
+
+        # Check if values actually changed for this device
+        values_changed = False
         for i, val in enumerate(device_values):
             ch = start_ch + i
             if 0 <= ch < 512:
-                channels[ch] = max(0, min(255, int(val)))  # Clamp values
+                new_value = max(0, min(255, int(val)))  # Clamp to 0-255
+                if universe_channels[ch] != new_value:
+                    values_changed = True
+                    universe_channels[ch] = new_value
 
-        # Optimized cache check - only compare relevant channels
-        if device_id in dmx_channel_cache:
-            cached_channels = dmx_channel_cache[device_id]
-            # Only compare the channels actually used by this device
-            channels_changed = False
-            for i in range(channel_count):
-                ch = start_ch + i
-                if 0 <= ch < 512 and cached_channels[ch] != channels[ch]:
-                    channels_changed = True
-                    break
+        # Skip send if nothing changed
+        if not values_changed:
+            logger.debug(f"No changes for {device.get('name')}, skipping DMX send")
+            return True
 
-            if not channels_changed:
-                # Values unchanged, skip send
-                return True
+        # Send the complete universe
+        success = controller.send_dmx(device_ip, device_universe, universe_channels)
 
-        # Send DMX
-        success = controller.send_dmx(device['ip'], device['universe'], channels)
-
-        # Update cache on successful send
         if success:
-            dmx_channel_cache[device_id] = channels
+            logger.debug(f"DMX sent for {device.get('name')} on {device_ip} universe {device_universe}")
 
         return success
 
     except Exception as e:
-        logger.error(f"Error sending DMX for device {device.get('name')}: {e}")
+        logger.error(f"Error sending DMX for device {device.get('name')}: {e}", exc_info=True)
         return False
 
 
