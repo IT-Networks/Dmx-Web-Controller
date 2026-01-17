@@ -4,6 +4,7 @@ class DMXController {
     constructor() {
         this.ws = null;
         this.devices = [];
+        this.interfaces = [];
         this.scenes = [];
         this.groups = [];
         this.effects = [];
@@ -29,6 +30,7 @@ class DMXController {
         this.loadSettings();
         this.connectWebSocket();
         this.loadData();
+        this.loadInterfaces();
         this.loadFixtures();
         this.setupKeyboardShortcuts();
     }
@@ -215,6 +217,7 @@ class DMXController {
     updateHeader(tabName) {
         const titles = {
             'devices': ['Geräte', 'Verwalte deine DMX-Geräte'],
+            'interfaces': ['DMX Interfaces', 'Art-Net Nodes und DMX-Interfaces verwalten'],
             'groups': ['Gruppen', 'Steuere mehrere Geräte gleichzeitig'],
             'scenes': ['Szenen', 'Gespeicherte Lichtstimmungen'],
             'effects': ['Effekte', 'Dynamische Lichteffekte'],
@@ -229,6 +232,7 @@ class DMXController {
 
         const buttons = {
             'devices': '<button class="btn btn-primary" onclick="app.showAddDevice()"><svg width="20" height="20" viewBox="0 0 20 20"><path d="M10 3 L10 17 M3 10 L17 10" stroke="currentColor" stroke-width="2"/></svg><span>Gerät hinzufügen</span></button>',
+            'interfaces': '<button class="btn btn-primary" onclick="app.showArtNetDiscovery()"><svg width="20" height="20" viewBox="0 0 20 20"><circle cx="10" cy="10" r="7" fill="none" stroke="currentColor" stroke-width="2"/><path d="M14 14 L18 18" stroke="currentColor" stroke-width="2"/></svg><span>Geräte scannen</span></button><button class="btn btn-secondary" onclick="app.showAddInterface()" style="margin-left: 0.5rem;"><svg width="20" height="20" viewBox="0 0 20 20"><path d="M10 3 L10 17 M3 10 L17 10" stroke="currentColor" stroke-width="2"/></svg><span>Manuell hinzufügen</span></button>',
             'groups': '<button class="btn btn-primary" onclick="app.showAddGroup()"><svg width="20" height="20" viewBox="0 0 20 20"><path d="M10 3 L10 17 M3 10 L17 10" stroke="currentColor" stroke-width="2"/></svg><span>Gruppe erstellen</span></button>',
             'scenes': '<button class="btn btn-primary" onclick="app.showAddScene()"><svg width="20" height="20" viewBox="0 0 20 20"><path d="M10 3 L10 17 M3 10 L17 10" stroke="currentColor" stroke-width="2"/></svg><span>Szene erstellen</span></button>',
             'effects': '',
@@ -245,6 +249,11 @@ class DMXController {
                 this.initStageVisualizer();
                 this.restoreStageDemoState();
             }, 100);
+        }
+
+        // Render interfaces if switching to interfaces tab
+        if (tabName === 'interfaces') {
+            this.renderInterfaces();
         }
     }
     
@@ -681,7 +690,7 @@ class DMXController {
                                 <h4 style="margin: 0 0 0.25rem 0; color: var(--text-primary);">${node.short_name}</h4>
                                 <p style="margin: 0; color: var(--text-secondary); font-size: 0.875rem;">${node.long_name}</p>
                             </div>
-                            <button class="btn btn-primary btn-sm" onclick="app.addDiscoveredDevice(${index})">
+                            <button class="btn btn-primary btn-sm" onclick="app.addDiscoveredInterface(${index})">
                                 + Hinzufügen
                             </button>
                         </div>
@@ -726,6 +735,159 @@ class DMXController {
         document.getElementById('deviceChannel').value = '1';
 
         this.showToast('Gerätedaten übernommen - bitte Konfiguration prüfen', 'success');
+    }
+
+    // ===== Interface Management =====
+    showAddInterface() {
+        this.showModal('addInterfaceModal');
+    }
+
+    async addInterface() {
+        const name = document.getElementById('interfaceName').value;
+        const ip = document.getElementById('interfaceIp').value;
+        const port = parseInt(document.getElementById('interfacePort').value);
+        const universe = parseInt(document.getElementById('interfaceUniverse').value);
+        const type = document.getElementById('interfaceType').value;
+        const description = document.getElementById('interfaceDescription').value;
+
+        if (!name || !ip) {
+            this.showToast('Bitte Name und IP-Adresse angeben', 'error');
+            return;
+        }
+
+        const interface_obj = {
+            id: `interface_${Date.now()}`,
+            name,
+            ip,
+            port,
+            universe,
+            type,
+            description,
+            status: 'unknown',
+            created_at: new Date().toISOString()
+        };
+
+        this.interfaces.push(interface_obj);
+        this.saveInterfaces();
+        this.renderInterfaces();
+        this.closeModal('addInterfaceModal');
+        this.showToast('Interface hinzugefügt', 'success');
+
+        // Clear form
+        document.getElementById('interfaceName').value = '';
+        document.getElementById('interfaceIp').value = '';
+        document.getElementById('interfacePort').value = '6454';
+        document.getElementById('interfaceUniverse').value = '0';
+        document.getElementById('interfaceDescription').value = '';
+    }
+
+    addDiscoveredInterface(index) {
+        const node = this.discoveredNodes[index];
+        if (!node) return;
+
+        // Close discovery modal
+        this.closeArtNetDiscovery();
+
+        // Open add interface modal with pre-filled data
+        this.showAddInterface();
+
+        // Fill in the form
+        document.getElementById('interfaceName').value = node.short_name;
+        document.getElementById('interfaceIp').value = node.source_ip;
+        document.getElementById('interfacePort').value = node.port;
+        document.getElementById('interfaceUniverse').value = '0';
+        document.getElementById('interfaceType').value = 'artnet';
+        document.getElementById('interfaceDescription').value = node.long_name;
+
+        this.showToast('Interface-Daten übernommen - bitte Konfiguration prüfen', 'success');
+    }
+
+    renderInterfaces() {
+        const container = document.getElementById('interfacesContainer');
+        if (!container) return;
+
+        if (this.interfaces.length === 0) {
+            container.innerHTML = `
+                <div class="empty-state">
+                    <svg width="64" height="64" viewBox="0 0 64 64">
+                        <rect x="8" y="20" width="48" height="24" rx="2" fill="none" stroke="currentColor" stroke-width="2" opacity="0.3"/>
+                        <circle cx="20" cy="32" r="3" fill="currentColor" opacity="0.5"/>
+                        <circle cx="32" cy="32" r="3" fill="currentColor" opacity="0.5"/>
+                        <circle cx="44" cy="32" r="3" fill="currentColor" opacity="0.5"/>
+                    </svg>
+                    <h3>Keine Interfaces vorhanden</h3>
+                    <p>Scanne nach Art-Net-Geräten oder füge manuell ein Interface hinzu</p>
+                </div>
+            `;
+            return;
+        }
+
+        container.innerHTML = this.interfaces.map(iface => `
+            <div class="device-card">
+                <div class="device-header">
+                    <div class="device-info">
+                        <h3>${iface.name}</h3>
+                        <p class="device-type">${this.getInterfaceTypeLabel(iface.type)} - ${iface.ip}:${iface.port}</p>
+                        ${iface.description ? `<p class="device-description">${iface.description}</p>` : ''}
+                    </div>
+                    <div class="device-actions">
+                        <button class="btn-icon" onclick="app.deleteInterface('${iface.id}')" title="Löschen">
+                            <svg width="20" height="20" viewBox="0 0 20 20">
+                                <path d="M6 2 L6 4 M14 2 L14 4 M4 4 L16 4 M5 4 L5 18 L15 18 L15 4 M8 8 L8 14 M12 8 L12 14" stroke="currentColor" stroke-width="2" fill="none"/>
+                            </svg>
+                        </button>
+                    </div>
+                </div>
+                <div class="interface-details">
+                    <div class="detail-item">
+                        <span class="detail-label">Universe:</span>
+                        <span class="detail-value">${iface.universe}</span>
+                    </div>
+                    <div class="detail-item">
+                        <span class="detail-label">Status:</span>
+                        <span class="detail-value status-${iface.status}">${this.getStatusLabel(iface.status)}</span>
+                    </div>
+                </div>
+            </div>
+        `).join('');
+    }
+
+    getInterfaceTypeLabel(type) {
+        const labels = {
+            'artnet': 'Art-Net',
+            'sacn': 'sACN (E1.31)',
+            'dmx': 'DMX (USB)'
+        };
+        return labels[type] || type;
+    }
+
+    getStatusLabel(status) {
+        const labels = {
+            'online': 'Online',
+            'offline': 'Offline',
+            'unknown': 'Unbekannt'
+        };
+        return labels[status] || 'Unbekannt';
+    }
+
+    async deleteInterface(interfaceId) {
+        if (!confirm('Interface wirklich löschen?')) return;
+
+        this.interfaces = this.interfaces.filter(i => i.id !== interfaceId);
+        this.saveInterfaces();
+        this.renderInterfaces();
+        this.showToast('Interface gelöscht', 'success');
+    }
+
+    saveInterfaces() {
+        localStorage.setItem('dmx_interfaces', JSON.stringify(this.interfaces));
+    }
+
+    loadInterfaces() {
+        const saved = localStorage.getItem('dmx_interfaces');
+        if (saved) {
+            this.interfaces = JSON.parse(saved);
+        }
     }
 
     selectSceneColor(color) {
