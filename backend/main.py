@@ -392,6 +392,10 @@ def load_data():
         logger.error(f"Error loading fixture library: {e}")
         fixtures = []
 
+    # Initialize DMX universe states with current device values
+    # CRITICAL: Prevents devices from resetting other devices' channels to 0
+    initialize_universe_states()
+
 
 def save_devices():
     """Speichert Geräte mit atomic write und backup"""
@@ -471,6 +475,55 @@ def save_sequences():
         return False
 
 
+def initialize_universe_states():
+    """
+    Initialisiert die Universe-States mit allen aktuellen Device-Werten.
+    KRITISCH: Verhindert, dass beim ersten Update eines Devices andere Devices auf 0 gesetzt werden.
+    """
+    logger.info("Initializing DMX universe states with current device values...")
+
+    with dmx_universe_lock:
+        # Clear existing states
+        dmx_universe_state.clear()
+
+        # Group devices by universe
+        universe_devices = {}
+        for device in devices:
+            device_ip = device.get('ip')
+            device_universe = device.get('universe')
+
+            if not device_ip or device_universe is None:
+                continue
+
+            universe_key = (device_ip, device_universe)
+            if universe_key not in universe_devices:
+                universe_devices[universe_key] = []
+            universe_devices[universe_key].append(device)
+
+        # Initialize each universe with device values
+        for universe_key, devs in universe_devices.items():
+            device_ip, device_universe = universe_key
+
+            # Create universe state
+            dmx_universe_state[universe_key] = [0] * 512
+            universe_channels = dmx_universe_state[universe_key]
+
+            # Apply all device values
+            for device in devs:
+                start_ch = device.get('start_channel', 1) - 1
+                device_values = device.get('values', [])
+
+                for i, val in enumerate(device_values):
+                    ch = start_ch + i
+                    if 0 <= ch < 512:
+                        universe_channels[ch] = max(0, min(255, int(val)))
+
+                logger.debug(f"  Initialized {device.get('name')} on {device_ip} universe {device_universe} "
+                           f"channels {start_ch+1}-{start_ch+len(device_values)}")
+
+            logger.info(f"Initialized universe {device_ip} universe {device_universe} with {len(devs)} devices")
+
+
 # DMX Universe Immediate Send
 async def send_universe_immediate(device_ip: str, device_universe: int, device_name: str = "Unknown"):
     """
@@ -527,10 +580,22 @@ def update_device_dmx(device) -> tuple:
 
         # Thread-safe universe state update
         with dmx_universe_lock:
-            # Initialize universe state if it doesn't exist
+            # Universe should already be initialized at startup
+            # If not, initialize it here (shouldn't happen in normal operation)
             if universe_key not in dmx_universe_state:
+                logger.warning(f"Universe state not initialized for {device_ip} universe {device_universe}, "
+                             f"initializing now. This should have been done at startup!")
                 dmx_universe_state[universe_key] = [0] * 512
-                logger.info(f"Initialized DMX universe state for {device_ip} universe {device_universe}")
+
+                # Apply ALL devices in this universe to prevent channel conflicts
+                for dev in devices:
+                    if dev.get('ip') == device_ip and dev.get('universe') == device_universe:
+                        dev_start = dev.get('start_channel', 1) - 1
+                        dev_values = dev.get('values', [])
+                        for i, val in enumerate(dev_values):
+                            ch = dev_start + i
+                            if 0 <= ch < 512:
+                                dmx_universe_state[universe_key][ch] = max(0, min(255, int(val)))
 
             # Get current universe state (make a reference, not a copy)
             universe_channels = dmx_universe_state[universe_key]
@@ -1728,6 +1793,9 @@ async def add_device(device_data: DeviceCreate):
         devices.append(device)
         save_devices()
 
+        # Re-initialize universe states to include new device
+        initialize_universe_states()
+
         await broadcast_update({
             'type': 'devices_updated',
             'devices': devices
@@ -1749,12 +1817,15 @@ async def delete_device(device_id: str):
     global devices
     devices = [d for d in devices if d.get('id') != device_id]
     save_devices()
-    
+
+    # Re-initialize universe states after device deletion
+    initialize_universe_states()
+
     await broadcast_update({
         'type': 'devices_updated',
         'devices': devices
     })
-    
+
     return {"success": True}
 
 
