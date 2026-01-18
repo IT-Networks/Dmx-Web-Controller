@@ -166,22 +166,57 @@ class ArtNetController:
                 logger.warning(f"Invalid channel count: {len(channels)}")
                 return False
 
-            # Build packet
-            packet = bytearray(530)
-            packet[0:8] = self.ARTNET_HEADER
-            packet[8:10] = struct.pack('<H', self.OPCODE_DMX)
-            packet[10:12] = struct.pack('>H', self.PROTOCOL_VERSION)
-            packet[12] = 0
-            packet[13] = 0
-            packet[14:16] = struct.pack('<H', universe)
-            packet[16:18] = struct.pack('>H', len(channels))
+            # ArtNet DMX packet format:
+            # - Must send even number of channels (ArtNet spec)
+            # - Always send full 512 channels for consistency
+            num_channels = 512
 
-            for i, value in enumerate(channels):
-                if i < 512:
-                    packet[18 + i] = max(0, min(255, int(value)))  # Clamp to 0-255
+            # Get/increment sequence number for this universe
+            if not hasattr(self, 'sequences'):
+                self.sequences = {}
+            if universe not in self.sequences:
+                self.sequences[universe] = 1
+            else:
+                self.sequences[universe] = (self.sequences[universe] + 1) % 256
 
-            # Send packet
-            self.sock.sendto(packet, (ip, self.ARTNET_PORT))
+            sequence = self.sequences[universe]
+
+            # Build packet header (18 bytes)
+            header = bytearray(18)
+            header[0:8] = self.ARTNET_HEADER              # "Art-Net\x00"
+            header[8:10] = struct.pack('<H', self.OPCODE_DMX)  # OpOutput = 0x5000
+            header[10:12] = struct.pack('>H', self.PROTOCOL_VERSION)  # ProtVer = 14
+            header[12] = sequence                          # Sequence (1-255, helps detect lost packets)
+            header[13] = 0                                 # Physical port
+            header[14:16] = struct.pack('<H', universe)    # Universe (little-endian)
+            header[16:18] = struct.pack('>H', num_channels)  # Length (big-endian)
+
+            # Build data payload (512 bytes)
+            # Ensure all 512 channels are sent, padding with 0 if needed
+            data = bytearray(num_channels)
+            for i in range(min(len(channels), num_channels)):
+                data[i] = max(0, min(255, int(channels[i])))  # Clamp to 0-255
+
+            # Combine header + data
+            packet = header + data
+
+            # Log packet details for debugging (first time or every 50th packet)
+            if not hasattr(self, 'packet_count'):
+                self.packet_count = 0
+            self.packet_count += 1
+
+            if self.packet_count <= 3 or self.packet_count % 50 == 0:
+                # Log non-zero channels for verification
+                non_zero_data = [(i+1, data[i]) for i in range(num_channels) if data[i] > 0]
+                logger.info(f"ArtNet packet #{self.packet_count} to {ip}:{universe} - "
+                          f"Size: {len(packet)} bytes, "
+                          f"Non-zero channels: {non_zero_data[:10]}")
+
+            # Send complete packet (18 + 512 = 530 bytes)
+            bytes_sent = self.sock.sendto(packet, (ip, self.ARTNET_PORT))
+
+            if bytes_sent != len(packet):
+                logger.warning(f"Packet size mismatch: sent {bytes_sent} bytes, expected {len(packet)}")
 
             # Reset error count on success
             if self.error_count > 0:
@@ -692,7 +727,7 @@ def update_device_dmx(device) -> tuple:
                     if old_value != new_value:
                         values_changed = True
                         universe_channels[ch] = new_value
-                        logger.info(f"  Universe update: Ch{ch+1} {old_value} → {new_value}")
+                        logger.info(f"  Universe update: Ch{ch+1} {old_value} -> {new_value}")
 
         if values_changed:
             logger.debug(f"Updated universe state for {device_name} on {device_ip} universe {device_universe} channels {start_ch+1}-{start_ch+len(device_values)}")
