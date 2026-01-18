@@ -586,12 +586,15 @@ async def universe_send_worker(device_ip: str, device_universe: int):
             # Increment sequence number
             dmx_universe_sequence[universe_key] = (dmx_universe_sequence[universe_key] + 1) % 256
 
+            # Log first 20 non-zero channels for debugging
+            non_zero = [(i+1, v) for i, v in enumerate(channels_to_send[:100]) if v > 0]
+            if non_zero:
+                logger.info(f"Sending universe {device_ip}:{device_universe} (seq={dmx_universe_sequence[universe_key]}): {non_zero[:10]}")
+
             # Send the universe (I/O outside lock)
             success = controller.send_dmx(device_ip, device_universe, channels_to_send)
 
-            if success:
-                logger.debug(f"DMX universe {device_ip}:{device_universe} sent (seq={dmx_universe_sequence[universe_key]})")
-            else:
+            if not success:
                 logger.warning(f"Failed to send DMX universe {device_ip}:{device_universe}")
 
             last_send_time = time.time()
@@ -685,9 +688,11 @@ def update_device_dmx(device) -> tuple:
                 ch = start_ch + i
                 if 0 <= ch < 512:
                     new_value = max(0, min(255, int(val)))  # Clamp to 0-255
-                    if universe_channels[ch] != new_value:
+                    old_value = universe_channels[ch]
+                    if old_value != new_value:
                         values_changed = True
                         universe_channels[ch] = new_value
+                        logger.info(f"  Universe update: Ch{ch+1} {old_value} → {new_value}")
 
         if values_changed:
             logger.debug(f"Updated universe state for {device_name} on {device_ip} universe {device_universe} channels {start_ch+1}-{start_ch+len(device_values)}")
@@ -2377,7 +2382,15 @@ async def websocket_endpoint(websocket: WebSocket):
                 if device:
                     channel_idx = data['channel_idx']
                     value = data['value']
+
+                    # Log incoming value for debugging
+                    logger.info(f"WebSocket: Device {device.get('name')} Ch{channel_idx} = {value} (type: {type(value).__name__})")
+
+                    # Ensure value is integer
+                    value = int(value)
                     device['values'][channel_idx] = value
+
+                    logger.info(f"  Stored in device['values'][{channel_idx}] = {device['values'][channel_idx]}")
 
                     # Create a snapshot of device data for thread-safe DMX processing
                     device_snapshot = {
