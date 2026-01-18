@@ -200,23 +200,11 @@ class ArtNetController:
             # Combine header + data
             packet = header + data
 
-            # Log packet details for debugging (first time or every 50th packet)
-            if not hasattr(self, 'packet_count'):
-                self.packet_count = 0
-            self.packet_count += 1
-
-            if self.packet_count <= 3 or self.packet_count % 50 == 0:
-                # Log non-zero channels for verification
-                non_zero_data = [(i+1, data[i]) for i in range(num_channels) if data[i] > 0]
-                logger.info(f"ArtNet packet #{self.packet_count} to {ip}:{universe} - "
-                          f"Size: {len(packet)} bytes, "
-                          f"Non-zero channels: {non_zero_data[:10]}")
-
             # Send complete packet (18 + 512 = 530 bytes)
             bytes_sent = self.sock.sendto(packet, (ip, self.ARTNET_PORT))
 
             if bytes_sent != len(packet):
-                logger.warning(f"Packet size mismatch: sent {bytes_sent} bytes, expected {len(packet)}")
+                logger.warning(f"ArtNet packet size mismatch: sent {bytes_sent} bytes, expected {len(packet)}")
 
             # Reset error count on success
             if self.error_count > 0:
@@ -558,17 +546,13 @@ def initialize_universe_states():
                     if 0 <= ch < 512:
                         universe_channels[ch] = max(0, min(255, int(val)))
 
-                logger.debug(f"  Initialized {device.get('name')} on {device_ip} universe {device_universe} "
-                           f"channels {start_ch+1}-{start_ch+len(device_values)}")
-
-            logger.info(f"Initialized universe {device_ip} universe {device_universe} with {len(devs)} devices")
+            logger.info(f"Initialized universe {device_ip}:{device_universe} with {len(devs)} devices")
 
     # Start workers for each universe and send initial state
     for universe_key in dmx_universe_state.keys():
         device_ip, device_universe = universe_key
         # Mark as dirty to send initial state
         mark_universe_dirty(device_ip, device_universe)
-        logger.info(f"Started worker for universe {device_ip}:{device_universe}")
 
 
 # DMX Universe Worker - One worker per universe (state-of-the-art approach)
@@ -586,7 +570,6 @@ async def universe_send_worker(device_ip: str, device_universe: int):
     """
     universe_key = (device_ip, device_universe)
     event = dmx_universe_events[universe_key]
-    logger.info(f"Started DMX worker for universe {device_ip}:{device_universe}")
 
     # Initialize sequence number
     dmx_universe_sequence[universe_key] = 0
@@ -621,11 +604,6 @@ async def universe_send_worker(device_ip: str, device_universe: int):
             # Increment sequence number
             dmx_universe_sequence[universe_key] = (dmx_universe_sequence[universe_key] + 1) % 256
 
-            # Log first 20 non-zero channels for debugging
-            non_zero = [(i+1, v) for i, v in enumerate(channels_to_send[:100]) if v > 0]
-            if non_zero:
-                logger.info(f"Sending universe {device_ip}:{device_universe} (seq={dmx_universe_sequence[universe_key]}): {non_zero[:10]}")
-
             # Send the universe (I/O outside lock)
             success = controller.send_dmx(device_ip, device_universe, channels_to_send)
 
@@ -638,7 +616,7 @@ async def universe_send_worker(device_ip: str, device_universe: int):
             # This ensures NO updates are lost
 
     except asyncio.CancelledError:
-        logger.info(f"DMX worker for universe {device_ip}:{device_universe} stopped")
+        logger.debug(f"DMX worker for universe {device_ip}:{device_universe} stopped")
         raise
     except Exception as e:
         logger.error(f"DMX worker for universe {device_ip}:{device_universe} crashed: {e}", exc_info=True)
@@ -669,7 +647,7 @@ def mark_universe_dirty(device_ip: str, device_universe: int):
     if universe_key not in dmx_universe_workers:
         worker = asyncio.create_task(universe_send_worker(device_ip, device_universe))
         dmx_universe_workers[universe_key] = worker
-        logger.info(f"Created DMX worker for universe {device_ip}:{device_universe}")
+        logger.debug(f"Created DMX worker for universe {device_ip}:{device_universe}")
 
     return True
 
@@ -723,16 +701,9 @@ def update_device_dmx(device) -> tuple:
                 ch = start_ch + i
                 if 0 <= ch < 512:
                     new_value = max(0, min(255, int(val)))  # Clamp to 0-255
-                    old_value = universe_channels[ch]
-                    if old_value != new_value:
+                    if universe_channels[ch] != new_value:
                         values_changed = True
                         universe_channels[ch] = new_value
-                        logger.info(f"  Universe update: Ch{ch+1} {old_value} -> {new_value}")
-
-        if values_changed:
-            logger.debug(f"Updated universe state for {device_name} on {device_ip} universe {device_universe} channels {start_ch+1}-{start_ch+len(device_values)}")
-        else:
-            logger.debug(f"No changes for {device_name}, universe state unchanged")
 
         return (device_ip, device_universe, values_changed)
 
@@ -2416,16 +2387,8 @@ async def websocket_endpoint(websocket: WebSocket):
                 device = next((d for d in devices if d.get('id') == data['device_id']), None)
                 if device:
                     channel_idx = data['channel_idx']
-                    value = data['value']
-
-                    # Log incoming value for debugging
-                    logger.info(f"WebSocket: Device {device.get('name')} Ch{channel_idx} = {value} (type: {type(value).__name__})")
-
-                    # Ensure value is integer
-                    value = int(value)
+                    value = int(data['value'])  # Ensure integer
                     device['values'][channel_idx] = value
-
-                    logger.info(f"  Stored in device['values'][{channel_idx}] = {device['values'][channel_idx]}")
 
                     # Create a snapshot of device data for thread-safe DMX processing
                     device_snapshot = {
@@ -2437,16 +2400,14 @@ async def websocket_endpoint(websocket: WebSocket):
                         'values': device['values'].copy()
                     }
 
-                    # Update universe state in background (thread-safe)
-                    device_ip, device_universe, values_changed = await asyncio.to_thread(
-                        update_device_dmx, device_snapshot
-                    )
+                    # Update universe state (thread-safe via lock, no blocking I/O)
+                    # Direct call is faster than asyncio.to_thread for CPU-bound work
+                    device_ip, device_universe, values_changed = update_device_dmx(device_snapshot)
 
                     # Mark universe as dirty if values changed
                     # The dedicated worker will handle sending with proper rate limiting
                     if values_changed and device_ip and device_universe is not None:
                         mark_universe_dirty(device_ip, device_universe)
-                        logger.debug(f"Marked universe {device_ip}:{device_universe} as dirty (has pending updates)")
 
                     # Schedule debounced save (don't block on I/O)
                     if not save_devices_pending:
