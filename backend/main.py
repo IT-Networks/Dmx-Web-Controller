@@ -120,7 +120,7 @@ dmx_universe_lock = Lock()  # Thread-safe access to universe state
 # Universe worker tasks - one dedicated worker per universe
 # Key: (ip, universe) -> asyncio.Task (worker that continuously sends)
 dmx_universe_workers: Dict[tuple, asyncio.Task] = {}
-dmx_universe_pending: Dict[tuple, bool] = {}  # Track if send is pending
+dmx_universe_events: Dict[tuple, asyncio.Event] = {}  # Event signals new data available
 dmx_universe_sequence: Dict[tuple, int] = {}  # Sequence numbers per universe
 
 # ArtNet standard: max 44 fps = ~22ms between packets
@@ -544,11 +544,13 @@ async def universe_send_worker(device_ip: str, device_universe: int):
     - Single thread per universe (no parallel sends)
     - Rate limiting (40 fps max)
     - Sequence numbers
+    - Event-driven (no updates lost)
     - Atomic sends
 
-    This worker runs continuously and sends updates when pending.
+    This worker runs continuously and sends updates when signaled by event.
     """
     universe_key = (device_ip, device_universe)
+    event = dmx_universe_events[universe_key]
     logger.info(f"Started DMX worker for universe {device_ip}:{device_universe}")
 
     # Initialize sequence number
@@ -557,42 +559,45 @@ async def universe_send_worker(device_ip: str, device_universe: int):
 
     try:
         while True:
-            # Check if there's a pending send
-            if dmx_universe_pending.get(universe_key, False):
-                # Rate limiting: enforce minimum time between sends
-                current_time = time.time()
-                time_since_last = current_time - last_send_time
+            # Wait for event signaling new data is available
+            await event.wait()
 
-                if time_since_last < DMX_SEND_RATE_LIMIT:
-                    # Wait until rate limit allows next send
-                    await asyncio.sleep(DMX_SEND_RATE_LIMIT - time_since_last)
+            # Rate limiting: enforce minimum time between sends
+            current_time = time.time()
+            time_since_last = current_time - last_send_time
 
-                # Get current universe state (thread-safe)
-                with dmx_universe_lock:
-                    if universe_key not in dmx_universe_state:
-                        logger.warning(f"Universe {universe_key} not found in state, worker stopping")
-                        break
+            if time_since_last < DMX_SEND_RATE_LIMIT:
+                # Wait until rate limit allows next send
+                await asyncio.sleep(DMX_SEND_RATE_LIMIT - time_since_last)
 
-                    # Make a copy for sending (atomic snapshot)
-                    channels_to_send = dmx_universe_state[universe_key].copy()
+            # Clear event BEFORE taking snapshot
+            # This ensures any updates during send will re-trigger the event
+            event.clear()
 
-                # Increment sequence number
-                dmx_universe_sequence[universe_key] = (dmx_universe_sequence[universe_key] + 1) % 256
+            # Get current universe state (thread-safe atomic snapshot)
+            with dmx_universe_lock:
+                if universe_key not in dmx_universe_state:
+                    logger.warning(f"Universe {universe_key} not found in state, worker stopping")
+                    break
 
-                # Send the universe (I/O outside lock)
-                success = controller.send_dmx(device_ip, device_universe, channels_to_send)
+                # Make a copy for sending (atomic snapshot)
+                channels_to_send = dmx_universe_state[universe_key].copy()
 
-                if success:
-                    logger.debug(f"DMX universe {device_ip}:{device_universe} sent (seq={dmx_universe_sequence[universe_key]})")
-                else:
-                    logger.warning(f"Failed to send DMX universe {device_ip}:{device_universe}")
+            # Increment sequence number
+            dmx_universe_sequence[universe_key] = (dmx_universe_sequence[universe_key] + 1) % 256
 
-                # Mark as sent
-                dmx_universe_pending[universe_key] = False
-                last_send_time = time.time()
+            # Send the universe (I/O outside lock)
+            success = controller.send_dmx(device_ip, device_universe, channels_to_send)
+
+            if success:
+                logger.debug(f"DMX universe {device_ip}:{device_universe} sent (seq={dmx_universe_sequence[universe_key]})")
             else:
-                # No pending send, sleep briefly and check again
-                await asyncio.sleep(0.005)  # 5ms check interval
+                logger.warning(f"Failed to send DMX universe {device_ip}:{device_universe}")
+
+            last_send_time = time.time()
+
+            # If event was set again during send, it will trigger next iteration
+            # This ensures NO updates are lost
 
     except asyncio.CancelledError:
         logger.info(f"DMX worker for universe {device_ip}:{device_universe} stopped")
@@ -603,19 +608,24 @@ async def universe_send_worker(device_ip: str, device_universe: int):
         # Cleanup
         if universe_key in dmx_universe_workers:
             del dmx_universe_workers[universe_key]
-        if universe_key in dmx_universe_pending:
-            del dmx_universe_pending[universe_key]
+        if universe_key in dmx_universe_events:
+            del dmx_universe_events[universe_key]
 
 
 def mark_universe_dirty(device_ip: str, device_universe: int):
     """
     Marks a universe as having pending changes that need to be sent.
+    Uses asyncio.Event to signal worker without losing updates.
     Starts a worker if one doesn't exist for this universe.
     """
     universe_key = (device_ip, device_universe)
 
-    # Mark as pending
-    dmx_universe_pending[universe_key] = True
+    # Create event if it doesn't exist
+    if universe_key not in dmx_universe_events:
+        dmx_universe_events[universe_key] = asyncio.Event()
+
+    # Signal event - worker will send when ready
+    dmx_universe_events[universe_key].set()
 
     # Start worker if it doesn't exist
     if universe_key not in dmx_universe_workers:
