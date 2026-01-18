@@ -117,10 +117,14 @@ current_audio_data: Dict[str, float] = {  # Current audio levels from clients
 dmx_universe_state: Dict[tuple, List[int]] = {}
 dmx_universe_lock = Lock()  # Thread-safe access to universe state
 
-# Universe send debouncing to prevent multiple devices from sending conflicting data
-dmx_universe_send_tasks: Dict[tuple, asyncio.Task] = {}  # (ip, universe) -> pending send task
-dmx_universe_send_lock = Lock()  # Lock for send tasks dictionary
-DMX_SEND_DEBOUNCE = 0.001  # 1ms - minimal debounce to collect rapid updates
+# Universe worker tasks - one dedicated worker per universe
+# Key: (ip, universe) -> asyncio.Task (worker that continuously sends)
+dmx_universe_workers: Dict[tuple, asyncio.Task] = {}
+dmx_universe_pending: Dict[tuple, bool] = {}  # Track if send is pending
+dmx_universe_sequence: Dict[tuple, int] = {}  # Sequence numbers per universe
+
+# ArtNet standard: max 44 fps = ~22ms between packets
+DMX_SEND_RATE_LIMIT = 0.025  # 25ms = 40 fps (slightly conservative)
 
 last_save_time = time.time()  # For auto-save debouncing
 save_devices_pending = False  # Flag for pending save operations
@@ -479,6 +483,7 @@ def initialize_universe_states():
     """
     Initialisiert die Universe-States mit allen aktuellen Device-Werten.
     KRITISCH: Verhindert, dass beim ersten Update eines Devices andere Devices auf 0 gesetzt werden.
+    Startet auch die Worker-Threads für jedes Universe.
     """
     logger.info("Initializing DMX universe states with current device values...")
 
@@ -523,38 +528,102 @@ def initialize_universe_states():
 
             logger.info(f"Initialized universe {device_ip} universe {device_universe} with {len(devs)} devices")
 
+    # Start workers for each universe and send initial state
+    for universe_key in dmx_universe_state.keys():
+        device_ip, device_universe = universe_key
+        # Mark as dirty to send initial state
+        mark_universe_dirty(device_ip, device_universe)
+        logger.info(f"Started worker for universe {device_ip}:{device_universe}")
 
-# DMX Universe Immediate Send
-async def send_universe_immediate(device_ip: str, device_universe: int, device_name: str = "Unknown"):
+
+# DMX Universe Worker - One worker per universe (state-of-the-art approach)
+async def universe_send_worker(device_ip: str, device_universe: int):
     """
-    Sendet ein komplettes DMX Universe sofort.
-    Verwendet Universe-State um sicherzustellen, dass alle Device-Updates enthalten sind.
+    Dedicated worker for sending DMX updates for one universe.
+    Implements ArtNet best practices:
+    - Single thread per universe (no parallel sends)
+    - Rate limiting (40 fps max)
+    - Sequence numbers
+    - Atomic sends
+
+    This worker runs continuously and sends updates when pending.
+    """
+    universe_key = (device_ip, device_universe)
+    logger.info(f"Started DMX worker for universe {device_ip}:{device_universe}")
+
+    # Initialize sequence number
+    dmx_universe_sequence[universe_key] = 0
+    last_send_time = 0
+
+    try:
+        while True:
+            # Check if there's a pending send
+            if dmx_universe_pending.get(universe_key, False):
+                # Rate limiting: enforce minimum time between sends
+                current_time = time.time()
+                time_since_last = current_time - last_send_time
+
+                if time_since_last < DMX_SEND_RATE_LIMIT:
+                    # Wait until rate limit allows next send
+                    await asyncio.sleep(DMX_SEND_RATE_LIMIT - time_since_last)
+
+                # Get current universe state (thread-safe)
+                with dmx_universe_lock:
+                    if universe_key not in dmx_universe_state:
+                        logger.warning(f"Universe {universe_key} not found in state, worker stopping")
+                        break
+
+                    # Make a copy for sending (atomic snapshot)
+                    channels_to_send = dmx_universe_state[universe_key].copy()
+
+                # Increment sequence number
+                dmx_universe_sequence[universe_key] = (dmx_universe_sequence[universe_key] + 1) % 256
+
+                # Send the universe (I/O outside lock)
+                success = controller.send_dmx(device_ip, device_universe, channels_to_send)
+
+                if success:
+                    logger.debug(f"DMX universe {device_ip}:{device_universe} sent (seq={dmx_universe_sequence[universe_key]})")
+                else:
+                    logger.warning(f"Failed to send DMX universe {device_ip}:{device_universe}")
+
+                # Mark as sent
+                dmx_universe_pending[universe_key] = False
+                last_send_time = time.time()
+            else:
+                # No pending send, sleep briefly and check again
+                await asyncio.sleep(0.005)  # 5ms check interval
+
+    except asyncio.CancelledError:
+        logger.info(f"DMX worker for universe {device_ip}:{device_universe} stopped")
+        raise
+    except Exception as e:
+        logger.error(f"DMX worker for universe {device_ip}:{device_universe} crashed: {e}", exc_info=True)
+    finally:
+        # Cleanup
+        if universe_key in dmx_universe_workers:
+            del dmx_universe_workers[universe_key]
+        if universe_key in dmx_universe_pending:
+            del dmx_universe_pending[universe_key]
+
+
+def mark_universe_dirty(device_ip: str, device_universe: int):
+    """
+    Marks a universe as having pending changes that need to be sent.
+    Starts a worker if one doesn't exist for this universe.
     """
     universe_key = (device_ip, device_universe)
 
-    # Get the current universe state (thread-safe)
-    with dmx_universe_lock:
-        if universe_key not in dmx_universe_state:
-            logger.warning(f"Universe {universe_key} not found in state")
-            return False
+    # Mark as pending
+    dmx_universe_pending[universe_key] = True
 
-        # Make a copy of the universe for sending
-        channels_to_send = dmx_universe_state[universe_key].copy()
+    # Start worker if it doesn't exist
+    if universe_key not in dmx_universe_workers:
+        worker = asyncio.create_task(universe_send_worker(device_ip, device_universe))
+        dmx_universe_workers[universe_key] = worker
+        logger.info(f"Created DMX worker for universe {device_ip}:{device_universe}")
 
-    # Send the universe (I/O outside lock)
-    success = controller.send_dmx(device_ip, device_universe, channels_to_send)
-
-    if success:
-        logger.debug(f"DMX universe sent for {device_ip} universe {device_universe} (triggered by {device_name})")
-    else:
-        logger.warning(f"Failed to send DMX universe for {device_ip} universe {device_universe}")
-
-    # Remove task from pending tasks
-    with dmx_universe_send_lock:
-        if universe_key in dmx_universe_send_tasks:
-            del dmx_universe_send_tasks[universe_key]
-
-    return success
+    return True
 
 
 # DMX Senden mit Thread-Safe Universe-basierter State-Verwaltung
@@ -625,22 +694,20 @@ def update_device_dmx(device) -> tuple:
 # Legacy function for backward compatibility
 def send_device_dmx(device) -> bool:
     """
-    Legacy function - updates universe state and sends immediately.
-    Kept for backward compatibility with existing code.
+    Legacy function - updates universe state and marks for sending.
+    Kept for backward compatibility with existing code (scenes, effects, etc).
+    Now uses the worker-based system for proper rate limiting.
     """
     device_ip, device_universe, values_changed = update_device_dmx(device)
 
-    if not device_ip or not values_changed:
-        return True  # No changes, nothing to send
+    if not device_ip:
+        return False
 
-    # Get current universe state and send
-    universe_key = (device_ip, device_universe)
-    with dmx_universe_lock:
-        if universe_key not in dmx_universe_state:
-            return False
-        channels_to_send = dmx_universe_state[universe_key].copy()
+    if values_changed:
+        # Mark universe as dirty - worker will handle sending
+        mark_universe_dirty(device_ip, device_universe)
 
-    return controller.send_dmx(device_ip, device_universe, channels_to_send)
+    return True
 
 
 # Gruppen-Hilfsfunktionen
@@ -2317,16 +2384,11 @@ async def websocket_endpoint(websocket: WebSocket):
                         update_device_dmx, device_snapshot
                     )
 
-                    # Send universe immediately if values changed
+                    # Mark universe as dirty if values changed
+                    # The dedicated worker will handle sending with proper rate limiting
                     if values_changed and device_ip and device_universe is not None:
-                        universe_key = (device_ip, device_universe)
-
-                        # Always send immediately - frontend already throttles
-                        # This ensures all updates are sent without delay
-                        task = asyncio.create_task(
-                            send_universe_immediate(device_ip, device_universe, device['name'])
-                        )
-                        logger.debug(f"Sending universe update for {universe_key}")
+                        mark_universe_dirty(device_ip, device_universe)
+                        logger.debug(f"Marked universe {device_ip}:{device_universe} as dirty (has pending updates)")
 
                     # Schedule debounced save (don't block on I/O)
                     if not save_devices_pending:
