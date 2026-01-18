@@ -570,17 +570,17 @@ async def universe_send_worker(device_ip: str, device_universe: int):
                 # Wait until rate limit allows next send
                 await asyncio.sleep(DMX_SEND_RATE_LIMIT - time_since_last)
 
-            # Clear event BEFORE taking snapshot
-            # This ensures any updates during send will re-trigger the event
-            event.clear()
-
-            # Get current universe state (thread-safe atomic snapshot)
+            # CRITICAL: Clear event and take snapshot atomically
+            # This prevents race condition where update happens between clear and snapshot
             with dmx_universe_lock:
                 if universe_key not in dmx_universe_state:
                     logger.warning(f"Universe {universe_key} not found in state, worker stopping")
                     break
 
-                # Make a copy for sending (atomic snapshot)
+                # Clear event INSIDE lock - prevents updates between clear and snapshot
+                event.clear()
+
+                # Make a copy for sending (atomic snapshot immediately after clear)
                 channels_to_send = dmx_universe_state[universe_key].copy()
 
             # Increment sequence number
