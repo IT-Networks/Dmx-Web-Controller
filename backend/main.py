@@ -116,6 +116,12 @@ current_audio_data: Dict[str, float] = {  # Current audio levels from clients
 # Key: (ip, universe) -> [512 channel values]
 dmx_universe_state: Dict[tuple, List[int]] = {}
 dmx_universe_lock = Lock()  # Thread-safe access to universe state
+
+# Universe send debouncing to prevent multiple devices from sending conflicting data
+dmx_universe_send_tasks: Dict[tuple, asyncio.Task] = {}  # (ip, universe) -> pending send task
+dmx_universe_send_lock = Lock()  # Lock for send tasks dictionary
+DMX_SEND_DEBOUNCE = 0.005  # 5ms - collect multiple device updates before sending
+
 last_save_time = time.time()  # For auto-save debouncing
 save_devices_pending = False  # Flag for pending save operations
 SAVE_DEBOUNCE_INTERVAL = 2.0  # seconds
@@ -461,21 +467,59 @@ def save_sequences():
         return False
 
 
-# DMX Senden mit Thread-Safe Universe-basierter State-Verwaltung
-def send_device_dmx(device) -> bool:
+# DMX Universe Debounced Send
+async def send_universe_debounced(device_ip: str, device_universe: int, device_name: str = "Unknown"):
     """
-    Aktualisiert DMX-Universe mit Gerätewerten und sendet das komplette Universe.
+    Sendet ein komplettes DMX Universe nach einem kurzen Debounce-Intervall.
+    Dies verhindert, dass mehrere Devices im selben Universe sich gegenseitig überschreiben.
+    """
+    universe_key = (device_ip, device_universe)
+
+    # Wait for debounce interval to collect multiple updates
+    await asyncio.sleep(DMX_SEND_DEBOUNCE)
+
+    # Get the current universe state (thread-safe)
+    with dmx_universe_lock:
+        if universe_key not in dmx_universe_state:
+            logger.warning(f"Universe {universe_key} not found in state")
+            return False
+
+        # Make a copy of the universe for sending
+        channels_to_send = dmx_universe_state[universe_key].copy()
+
+    # Send the universe (I/O outside lock)
+    success = controller.send_dmx(device_ip, device_universe, channels_to_send)
+
+    if success:
+        logger.debug(f"DMX universe sent for {device_ip} universe {device_universe} (triggered by {device_name})")
+    else:
+        logger.warning(f"Failed to send DMX universe for {device_ip} universe {device_universe}")
+
+    # Remove task from pending tasks
+    with dmx_universe_send_lock:
+        if universe_key in dmx_universe_send_tasks:
+            del dmx_universe_send_tasks[universe_key]
+
+    return success
+
+
+# DMX Senden mit Thread-Safe Universe-basierter State-Verwaltung
+def update_device_dmx(device) -> tuple:
+    """
+    Aktualisiert DMX-Universe mit Gerätewerten.
     Thread-safe Implementation verhindert Race Conditions bei parallelen Updates.
+    Gibt (device_ip, device_universe, values_changed) zurück.
     """
     try:
         device_ip = device.get('ip')
         device_universe = device.get('universe')
         device_values = device.get('values', [])
+        device_name = device.get('name', 'Unknown')
         start_ch = device['start_channel'] - 1
 
         if not device_ip or device_universe is None:
-            logger.warning(f"Device {device.get('name')} missing IP or universe")
-            return False
+            logger.warning(f"Device {device_name} missing IP or universe")
+            return (None, None, False)
 
         # Universe key (ip, universe)
         universe_key = (device_ip, device_universe)
@@ -490,7 +534,7 @@ def send_device_dmx(device) -> bool:
             # Get current universe state (make a reference, not a copy)
             universe_channels = dmx_universe_state[universe_key]
 
-            # Check if values actually changed for this device
+            # Update device channels in the universe
             values_changed = False
             for i, val in enumerate(device_values):
                 ch = start_ch + i
@@ -500,27 +544,37 @@ def send_device_dmx(device) -> bool:
                         values_changed = True
                         universe_channels[ch] = new_value
 
-            # Skip send if nothing changed
-            if not values_changed:
-                logger.debug(f"No changes for {device.get('name')}, skipping DMX send")
-                return True
-
-            # Make a copy of the universe for sending (while still locked)
-            channels_to_send = universe_channels.copy()
-
-        # Send the complete universe OUTSIDE the lock (I/O should not be locked)
-        success = controller.send_dmx(device_ip, device_universe, channels_to_send)
-
-        if success:
-            logger.debug(f"DMX sent for {device.get('name')} on {device_ip} universe {device_universe} channels {start_ch+1}-{start_ch+len(device_values)}")
+        if values_changed:
+            logger.debug(f"Updated universe state for {device_name} on {device_ip} universe {device_universe} channels {start_ch+1}-{start_ch+len(device_values)}")
         else:
-            logger.warning(f"Failed to send DMX for {device.get('name')}")
+            logger.debug(f"No changes for {device_name}, universe state unchanged")
 
-        return success
+        return (device_ip, device_universe, values_changed)
 
     except Exception as e:
-        logger.error(f"Error sending DMX for device {device.get('name')}: {e}", exc_info=True)
-        return False
+        logger.error(f"Error updating DMX universe for device {device.get('name')}: {e}", exc_info=True)
+        return (None, None, False)
+
+
+# Legacy function for backward compatibility
+def send_device_dmx(device) -> bool:
+    """
+    Legacy function - updates universe state and sends immediately.
+    Kept for backward compatibility with existing code.
+    """
+    device_ip, device_universe, values_changed = update_device_dmx(device)
+
+    if not device_ip or not values_changed:
+        return True  # No changes, nothing to send
+
+    # Get current universe state and send
+    universe_key = (device_ip, device_universe)
+    with dmx_universe_lock:
+        if universe_key not in dmx_universe_state:
+            return False
+        channels_to_send = dmx_universe_state[universe_key].copy()
+
+    return controller.send_dmx(device_ip, device_universe, channels_to_send)
 
 
 # Gruppen-Hilfsfunktionen
@@ -2176,8 +2230,36 @@ async def websocket_endpoint(websocket: WebSocket):
                     value = data['value']
                     device['values'][channel_idx] = value
 
-                    # Send DMX immediately in background (non-blocking)
-                    asyncio.create_task(asyncio.to_thread(send_device_dmx, device))
+                    # Create a snapshot of device data for thread-safe DMX processing
+                    device_snapshot = {
+                        'id': device['id'],
+                        'name': device['name'],
+                        'ip': device['ip'],
+                        'universe': device['universe'],
+                        'start_channel': device['start_channel'],
+                        'values': device['values'].copy()
+                    }
+
+                    # Update universe state in background (thread-safe)
+                    device_ip, device_universe, values_changed = await asyncio.to_thread(
+                        update_device_dmx, device_snapshot
+                    )
+
+                    # Schedule debounced universe send if values changed
+                    if values_changed and device_ip and device_universe is not None:
+                        universe_key = (device_ip, device_universe)
+
+                        # Check if there's already a pending send task for this universe
+                        with dmx_universe_send_lock:
+                            if universe_key not in dmx_universe_send_tasks:
+                                # Create new debounced send task
+                                task = asyncio.create_task(
+                                    send_universe_debounced(device_ip, device_universe, device['name'])
+                                )
+                                dmx_universe_send_tasks[universe_key] = task
+                                logger.debug(f"Scheduled debounced send for universe {universe_key}")
+                            else:
+                                logger.debug(f"Send already pending for universe {universe_key}, update will be included")
 
                     # Schedule debounced save (don't block on I/O)
                     if not save_devices_pending:
