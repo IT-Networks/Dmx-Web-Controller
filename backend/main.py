@@ -120,7 +120,7 @@ dmx_universe_lock = Lock()  # Thread-safe access to universe state
 # Universe send debouncing to prevent multiple devices from sending conflicting data
 dmx_universe_send_tasks: Dict[tuple, asyncio.Task] = {}  # (ip, universe) -> pending send task
 dmx_universe_send_lock = Lock()  # Lock for send tasks dictionary
-DMX_SEND_DEBOUNCE = 0.005  # 5ms - collect multiple device updates before sending
+DMX_SEND_DEBOUNCE = 0.001  # 1ms - minimal debounce to collect rapid updates
 
 last_save_time = time.time()  # For auto-save debouncing
 save_devices_pending = False  # Flag for pending save operations
@@ -326,15 +326,19 @@ def atomic_write(file_path: Path, data: any):
 
 
 # WebSocket-Broadcast
-async def broadcast_update(data: dict):
-    """Sendet Updates an alle verbundenen Clients"""
+async def broadcast_update(data: dict, exclude_client=None):
+    """Sendet Updates an alle verbundenen Clients (außer exclude_client)"""
     disconnected = []
     for client in connected_clients:
+        # Skip the sender if specified
+        if exclude_client and client == exclude_client:
+            continue
+
         try:
             await client.send_json(data)
         except:
             disconnected.append(client)
-    
+
     for client in disconnected:
         connected_clients.remove(client)
 
@@ -467,16 +471,13 @@ def save_sequences():
         return False
 
 
-# DMX Universe Debounced Send
-async def send_universe_debounced(device_ip: str, device_universe: int, device_name: str = "Unknown"):
+# DMX Universe Immediate Send
+async def send_universe_immediate(device_ip: str, device_universe: int, device_name: str = "Unknown"):
     """
-    Sendet ein komplettes DMX Universe nach einem kurzen Debounce-Intervall.
-    Dies verhindert, dass mehrere Devices im selben Universe sich gegenseitig überschreiben.
+    Sendet ein komplettes DMX Universe sofort.
+    Verwendet Universe-State um sicherzustellen, dass alle Device-Updates enthalten sind.
     """
     universe_key = (device_ip, device_universe)
-
-    # Wait for debounce interval to collect multiple updates
-    await asyncio.sleep(DMX_SEND_DEBOUNCE)
 
     # Get the current universe state (thread-safe)
     with dmx_universe_lock:
@@ -2245,32 +2246,27 @@ async def websocket_endpoint(websocket: WebSocket):
                         update_device_dmx, device_snapshot
                     )
 
-                    # Schedule debounced universe send if values changed
+                    # Send universe immediately if values changed
                     if values_changed and device_ip and device_universe is not None:
                         universe_key = (device_ip, device_universe)
 
-                        # Check if there's already a pending send task for this universe
-                        with dmx_universe_send_lock:
-                            if universe_key not in dmx_universe_send_tasks:
-                                # Create new debounced send task
-                                task = asyncio.create_task(
-                                    send_universe_debounced(device_ip, device_universe, device['name'])
-                                )
-                                dmx_universe_send_tasks[universe_key] = task
-                                logger.debug(f"Scheduled debounced send for universe {universe_key}")
-                            else:
-                                logger.debug(f"Send already pending for universe {universe_key}, update will be included")
+                        # Always send immediately - frontend already throttles
+                        # This ensures all updates are sent without delay
+                        task = asyncio.create_task(
+                            send_universe_immediate(device_ip, device_universe, device['name'])
+                        )
+                        logger.debug(f"Sending universe update for {universe_key}")
 
                     # Schedule debounced save (don't block on I/O)
                     if not save_devices_pending:
                         asyncio.create_task(schedule_save_devices())
 
-                    # Broadcast to other clients (skip sender)
+                    # Broadcast to other clients (exclude sender to prevent echo)
                     await broadcast_update({
                         'type': 'device_values_updated',
                         'device_id': data['device_id'],
                         'values': device['values']
-                    })
+                    }, exclude_client=websocket)
 
             elif data['type'] == 'audio_data':
                 # Update global audio data from client
