@@ -743,23 +743,59 @@ def get_group_devices(group_id: str):
 
 
 def set_group_values(group_id: str, values: dict):
-    """Setzt Werte für alle Geräte in einer Gruppe"""
+    """Setzt Werte für alle Geräte in einer Gruppe (intelligent für unterschiedliche Fixtures)"""
     group_devices = get_group_devices(group_id)
 
     for device in group_devices:
         # Setze Intensität wenn vorhanden
         if 'intensity' in values:
-            intensity = values['intensity']
-            for i in range(len(device['values'])):
-                device['values'][i] = int(intensity)
+            intensity = int(values['intensity'])
+
+            # Use channel_layout if available to find intensity channels
+            if device.get('channel_layout'):
+                # Find all intensity/dimmer channels
+                intensity_channels = [
+                    ch['index'] for ch in device['channel_layout']
+                    if ch['type'] in ['intensity', 'dimmer']
+                ]
+
+                if intensity_channels:
+                    # Set only intensity channels
+                    for ch_idx in intensity_channels:
+                        if ch_idx < len(device['values']):
+                            device['values'][ch_idx] = intensity
+                else:
+                    # No specific intensity channel found, set all channels
+                    for i in range(len(device['values'])):
+                        device['values'][i] = intensity
+            else:
+                # No channel layout, use legacy behavior
+                # For simple devices (dimmer, rgb, rgbw), set all channels
+                for i in range(len(device['values'])):
+                    device['values'][i] = intensity
 
         # Setze RGB Werte wenn vorhanden
-        if 'rgb' in values and device['device_type'] in ['rgb', 'rgbw']:
+        if 'rgb' in values:
             r, g, b = values['rgb']
-            if len(device['values']) >= 3:
-                device['values'][0] = int(r)
-                device['values'][1] = int(g)
-                device['values'][2] = int(b)
+
+            # Use channel_layout if available
+            if device.get('channel_layout'):
+                red_ch = next((ch['index'] for ch in device['channel_layout'] if ch['type'] == 'red'), None)
+                green_ch = next((ch['index'] for ch in device['channel_layout'] if ch['type'] == 'green'), None)
+                blue_ch = next((ch['index'] for ch in device['channel_layout'] if ch['type'] == 'blue'), None)
+
+                if red_ch is not None and red_ch < len(device['values']):
+                    device['values'][red_ch] = int(r)
+                if green_ch is not None and green_ch < len(device['values']):
+                    device['values'][green_ch] = int(g)
+                if blue_ch is not None and blue_ch < len(device['values']):
+                    device['values'][blue_ch] = int(b)
+            elif device['device_type'] in ['rgb', 'rgbw']:
+                # Legacy: assume first 3 channels are RGB
+                if len(device['values']) >= 3:
+                    device['values'][0] = int(r)
+                    device['values'][1] = int(g)
+                    device['values'][2] = int(b)
 
         send_device_dmx(device)
 

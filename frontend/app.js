@@ -697,10 +697,14 @@ class DMXController {
         this.groups.forEach(group => {
             const slider = document.getElementById(`group-slider-${group.id}`);
             if (slider) {
-                slider.addEventListener('input', (e) => {
+                // Handle both input (while dragging) and change (on release) events
+                const updateValue = (e) => {
                     document.getElementById(`group-value-${group.id}`).textContent = e.target.value;
                     this.updateGroupIntensity(group.id, e.target.value);
-                });
+                };
+
+                slider.addEventListener('input', updateValue);
+                slider.addEventListener('change', updateValue);
             }
         });
     }
