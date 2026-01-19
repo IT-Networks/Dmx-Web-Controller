@@ -124,11 +124,12 @@ dmx_universe_events: Dict[tuple, asyncio.Event] = {}  # Event signals new data a
 dmx_universe_sequence: Dict[tuple, int] = {}  # Sequence numbers per universe
 
 # ArtNet standard: max 44 fps = ~22ms between packets
-# Reduced to prevent mechanical noise in moving heads and transformers
-DMX_SEND_RATE_LIMIT = 0.050  # 50ms = 20 fps (reduces "fip" sounds)
+# Optimized for LED spots to prevent PWM-related noise in drivers/transformers
+DMX_SEND_RATE_LIMIT = 0.100  # 100ms = 10 fps (optimal for LED spots)
 
 # Minimum value change to trigger update (prevents micro-adjustments)
-DMX_VALUE_THRESHOLD = 2  # Only send if value changed by at least 2
+# Higher threshold for LED spots reduces PWM switching noise
+DMX_VALUE_THRESHOLD = 5  # Only send if value changed by at least 5
 
 last_save_time = time.time()  # For auto-save debouncing
 save_devices_pending = False  # Flag for pending save operations

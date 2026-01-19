@@ -21,10 +21,11 @@ class DMXController {
         this.serverUrl = this.getServerUrl();
         this.wsUrl = this.getWebSocketUrl();
 
-        // DMX update throttling with immediate first send
+        // DMX update throttling optimized for LED spots
         this.dmxUpdateQueue = new Map(); // key -> {deviceId, channelIdx, value}
         this.dmxSendPending = false;
-        this.DMX_UPDATE_INTERVAL = 16; // ms between batches (~60fps)
+        this.dmxSendTimer = null;
+        this.DMX_UPDATE_INTERVAL = 100; // ms between batches (10fps, reduces PWM noise)
 
         // Truss system
         this.trusses = [];
@@ -506,15 +507,19 @@ class DMXController {
             value: parseInt(value)
         });
 
-        // Schedule send on next animation frame (60fps smooth updates)
-        if (!this.dmxSendPending) {
-            this.dmxSendPending = true;
-            requestAnimationFrame(() => this.processDMXUpdateQueue());
+        // Debounce: Clear previous timer and set new one
+        // This reduces rapid-fire updates that cause PWM noise
+        if (this.dmxSendTimer) {
+            clearTimeout(this.dmxSendTimer);
         }
+
+        this.dmxSendTimer = setTimeout(() => {
+            this.processDMXUpdateQueue();
+        }, this.DMX_UPDATE_INTERVAL);
     }
 
     processDMXUpdateQueue() {
-        this.dmxSendPending = false;
+        this.dmxSendTimer = null;
 
         // Send all queued updates
         if (this.dmxUpdateQueue.size > 0 && this.ws && this.ws.readyState === WebSocket.OPEN) {
