@@ -603,12 +603,19 @@ async def universe_send_worker(device_ip: str, device_universe: int):
 
             # Increment sequence number
             dmx_universe_sequence[universe_key] = (dmx_universe_sequence[universe_key] + 1) % 256
+            seq = dmx_universe_sequence[universe_key]
+
+            # Log what we're sending
+            non_zero = [(i+1, v) for i, v in enumerate(channels_to_send) if v > 0]
+            logger.info(f"[SEND] Universe {device_ip}:{device_universe} seq={seq} - Sending {len(non_zero)} non-zero channels: {non_zero[:15]}")
 
             # Send the universe (I/O outside lock)
             success = controller.send_dmx(device_ip, device_universe, channels_to_send)
 
             if not success:
-                logger.warning(f"Failed to send DMX universe {device_ip}:{device_universe}")
+                logger.warning(f"[SEND] Failed to send DMX universe {device_ip}:{device_universe}")
+            else:
+                logger.info(f"[SEND] Successfully sent universe {device_ip}:{device_universe}")
 
             last_send_time = time.time()
 
@@ -695,15 +702,28 @@ def update_device_dmx(device) -> tuple:
             # Get current universe state (make a reference, not a copy)
             universe_channels = dmx_universe_state[universe_key]
 
+            # Log current universe state before update
+            relevant_channels = [(start_ch + i + 1, universe_channels[start_ch + i])
+                               for i in range(min(len(device_values), 10))]
+            logger.info(f"[UPDATE] Device '{device_name}' - Before update, universe channels: {relevant_channels}")
+
             # Update device channels in the universe
             values_changed = False
+            changes = []
             for i, val in enumerate(device_values):
                 ch = start_ch + i
                 if 0 <= ch < 512:
+                    old_value = universe_channels[ch]
                     new_value = max(0, min(255, int(val)))  # Clamp to 0-255
-                    if universe_channels[ch] != new_value:
+                    if old_value != new_value:
                         values_changed = True
                         universe_channels[ch] = new_value
+                        changes.append(f"CH{ch+1}: {old_value}->{new_value}")
+
+            if changes:
+                logger.info(f"[UPDATE] Changes applied: {', '.join(changes)}")
+            else:
+                logger.warning(f"[UPDATE] No changes! Device values: {device_values[:5]}, Universe had same values")
 
         return (device_ip, device_universe, values_changed)
 
@@ -2388,7 +2408,11 @@ async def websocket_endpoint(websocket: WebSocket):
                 if device:
                     channel_idx = data['channel_idx']
                     value = int(data['value'])  # Ensure integer
+
+                    old_device_value = device['values'][channel_idx]
                     device['values'][channel_idx] = value
+
+                    logger.info(f"[WS] Device '{device.get('name')}' Ch{channel_idx}: {old_device_value} -> {value} (Start: CH{device.get('start_channel')})")
 
                     # Create a snapshot of device data for thread-safe DMX processing
                     device_snapshot = {
@@ -2404,10 +2428,15 @@ async def websocket_endpoint(websocket: WebSocket):
                     # Direct call is faster than asyncio.to_thread for CPU-bound work
                     device_ip, device_universe, values_changed = update_device_dmx(device_snapshot)
 
+                    logger.info(f"[WS] Update result: ip={device_ip}, universe={device_universe}, changed={values_changed}")
+
                     # Mark universe as dirty if values changed
                     # The dedicated worker will handle sending with proper rate limiting
                     if values_changed and device_ip and device_universe is not None:
                         mark_universe_dirty(device_ip, device_universe)
+                        logger.info(f"[WS] Marked universe {device_ip}:{device_universe} as dirty")
+                    elif not values_changed:
+                        logger.warning(f"[WS] No changes detected! Device values: {device_snapshot['values'][:5]}")
 
                     # Schedule debounced save (don't block on I/O)
                     if not save_devices_pending:
