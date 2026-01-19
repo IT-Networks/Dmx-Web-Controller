@@ -743,7 +743,22 @@ class DMXController {
             this.showToast('Fade zur Szene...', 'success');
         } catch (error) { console.error(error); }
     }
-    
+
+    async blackout(fade = false) {
+        try {
+            const fadeTime = fade ? 2.0 : 0;  // 2 seconds fade or instant
+            await this.apiCall('/api/blackout', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ fade_time: fadeTime })
+            });
+            this.showToast(fade ? 'Blackout Fade...' : 'Blackout!', 'success');
+        } catch (error) {
+            console.error(error);
+            this.showToast('Blackout Fehler', 'error');
+        }
+    }
+
     renderScenes() {
         const container = document.getElementById('scenesContainer');
         if (this.scenes.length === 0) {

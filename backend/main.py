@@ -2106,6 +2106,61 @@ async def activate_scene(scene_id: str):
     return {"success": True, "fading": True}
 
 
+@app.post("/api/blackout")
+async def blackout(data: dict):
+    """Sets all devices to zero (blackout) with optional fade"""
+    fade_time = data.get('fade_time', 0)  # seconds, 0 = instant
+
+    if fade_time > 0:
+        # Fade to black
+        asyncio.create_task(fade_all_to_black(fade_time))
+        return {"success": True, "fading": True}
+    else:
+        # Instant blackout
+        for device in devices:
+            for i in range(len(device['values'])):
+                device['values'][i] = 0
+            send_device_dmx(device)
+
+        save_devices()
+
+        await broadcast_update({
+            'type': 'devices_updated',
+            'devices': devices
+        })
+
+        return {"success": True, "fading": False}
+
+
+async def fade_all_to_black(fade_time: float):
+    """Fades all devices to black over specified time"""
+    steps = 20  # Number of fade steps
+    delay = fade_time / steps
+
+    # Store start values
+    start_values = {d['id']: d['values'].copy() for d in devices}
+
+    for step in range(steps + 1):
+        factor = 1 - (step / steps)  # 1.0 to 0.0
+
+        for device in devices:
+            start_vals = start_values.get(device['id'], [0] * len(device['values']))
+            for i in range(len(device['values'])):
+                device['values'][i] = int(start_vals[i] * factor)
+
+            send_device_dmx(device)
+
+        await asyncio.sleep(delay)
+
+    # Ensure all are exactly 0
+    for device in devices:
+        for i in range(len(device['values'])):
+            device['values'][i] = 0
+        send_device_dmx(device)
+
+    save_devices()
+
+
 # Gruppen API
 @app.get("/api/groups")
 async def get_groups():
