@@ -2251,6 +2251,41 @@ async def stop_effect_endpoint(effect_id: str):
     return {"success": success}
 
 
+@app.put("/api/effects/{effect_id}")
+async def update_effect(effect_id: str, effect_data: EffectCreate):
+    """Updates effect configuration"""
+    try:
+        effect = next((e for e in effects if e['id'] == effect_id), None)
+
+        if not effect:
+            raise HTTPException(status_code=404, detail="Effect not found")
+
+        # Stop effect if currently running
+        if effect.get('active'):
+            await stop_effect(effect_id)
+
+        # Update effect properties
+        updated_data = effect_data.model_dump()
+        effect.update(updated_data)
+        effect['active'] = False  # Reset active state after editing
+
+        save_effects()
+
+        await broadcast_update({
+            'type': 'effects_updated',
+            'effects': effects
+        })
+
+        logger.info(f"Updated effect: {effect['name']} ({effect['id']})")
+        return {"success": True, "effect": effect}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error updating effect: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.delete("/api/effects/{effect_id}")
 async def delete_effect(effect_id: str):
     """Löscht Effekt"""
