@@ -494,15 +494,21 @@ class DMXController {
 
         this.devices.forEach(device => {
             // Use actual channel count from device, not device_type mapping
-            const channels = device.values ? device.values.length : device.channel_count || 1;
+            // Prefer device.channel_count as it's the source of truth, fallback to values.length
+            const channels = device.channel_count || (device.values ? device.values.length : 1);
             for (let i = 0; i < channels; i++) {
                 const slider = document.getElementById(`slider-${device.id}-${i}`);
                 if (slider) {
-                    slider.addEventListener('input', (e) => {
+                    // Handle both input (while dragging) and change (on release) events
+                    // This ensures value is sent even if mouse leaves slider area
+                    const updateValue = (e) => {
                         const value = parseInt(e.target.value);
                         document.getElementById(`value-${device.id}-${i}`).textContent = value;
                         this.updateDeviceValue(device.id, i, value);
-                    });
+                    };
+
+                    slider.addEventListener('input', updateValue);
+                    slider.addEventListener('change', updateValue);
                 }
             }
         });
@@ -510,8 +516,22 @@ class DMXController {
 
     createDeviceCard(device) {
         // Generate controls based on actual values array length, not device_type
-        const channelCount = device.values ? device.values.length : device.channel_count || 1;
-        const channelLabels = this.getChannelLabels(device.device_type);
+        // Prefer device.channel_count as it's the source of truth, fallback to values.length
+        const channelCount = device.channel_count || (device.values ? device.values.length : 1);
+
+        // Ensure device.values array has correct length
+        if (!device.values || device.values.length !== channelCount) {
+            device.values = Array(channelCount).fill(0);
+        }
+
+        // Use channel_layout from fixture if available, otherwise use generic labels
+        let channelLabels = [];
+        if (device.channel_layout && Array.isArray(device.channel_layout)) {
+            channelLabels = device.channel_layout.map(ch => ch.name);
+        } else {
+            channelLabels = this.getChannelLabels(device.device_type);
+        }
+
         const colors = ['', 'red', 'green', 'blue', 'white'];
 
         // Create controls for all channels in values array
