@@ -743,23 +743,59 @@ def get_group_devices(group_id: str):
 
 
 def set_group_values(group_id: str, values: dict):
-    """Setzt Werte für alle Geräte in einer Gruppe"""
+    """Setzt Werte für alle Geräte in einer Gruppe (intelligent für unterschiedliche Fixtures)"""
     group_devices = get_group_devices(group_id)
 
     for device in group_devices:
         # Setze Intensität wenn vorhanden
         if 'intensity' in values:
-            intensity = values['intensity']
-            for i in range(len(device['values'])):
-                device['values'][i] = int(intensity)
+            intensity = int(values['intensity'])
+
+            # Use channel_layout if available to find intensity channels
+            if device.get('channel_layout'):
+                # Find all intensity/dimmer channels
+                intensity_channels = [
+                    ch['index'] for ch in device['channel_layout']
+                    if ch['type'] in ['intensity', 'dimmer']
+                ]
+
+                if intensity_channels:
+                    # Set only intensity channels
+                    for ch_idx in intensity_channels:
+                        if ch_idx < len(device['values']):
+                            device['values'][ch_idx] = intensity
+                else:
+                    # No specific intensity channel found, set all channels
+                    for i in range(len(device['values'])):
+                        device['values'][i] = intensity
+            else:
+                # No channel layout, use legacy behavior
+                # For simple devices (dimmer, rgb, rgbw), set all channels
+                for i in range(len(device['values'])):
+                    device['values'][i] = intensity
 
         # Setze RGB Werte wenn vorhanden
-        if 'rgb' in values and device['device_type'] in ['rgb', 'rgbw']:
+        if 'rgb' in values:
             r, g, b = values['rgb']
-            if len(device['values']) >= 3:
-                device['values'][0] = int(r)
-                device['values'][1] = int(g)
-                device['values'][2] = int(b)
+
+            # Use channel_layout if available
+            if device.get('channel_layout'):
+                red_ch = next((ch['index'] for ch in device['channel_layout'] if ch['type'] == 'red'), None)
+                green_ch = next((ch['index'] for ch in device['channel_layout'] if ch['type'] == 'green'), None)
+                blue_ch = next((ch['index'] for ch in device['channel_layout'] if ch['type'] == 'blue'), None)
+
+                if red_ch is not None and red_ch < len(device['values']):
+                    device['values'][red_ch] = int(r)
+                if green_ch is not None and green_ch < len(device['values']):
+                    device['values'][green_ch] = int(g)
+                if blue_ch is not None and blue_ch < len(device['values']):
+                    device['values'][blue_ch] = int(b)
+            elif device['device_type'] in ['rgb', 'rgbw']:
+                # Legacy: assume first 3 channels are RGB
+                if len(device['values']) >= 3:
+                    device['values'][0] = int(r)
+                    device['values'][1] = int(g)
+                    device['values'][2] = int(b)
 
         send_device_dmx(device)
 
@@ -1900,6 +1936,67 @@ async def add_device(device_data: DeviceCreate):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.put("/api/devices/{device_id}")
+async def update_device(device_id: str, device_data: DeviceCreate):
+    """Updates device configuration"""
+    try:
+        device = next((d for d in devices if d.get('id') == device_id), None)
+
+        if not device:
+            raise HTTPException(status_code=404, detail="Device not found")
+
+        # Check for duplicate on different device (excluding current device)
+        for existing in devices:
+            if (existing['id'] != device_id and
+                existing['ip'] == device_data.ip and
+                existing['universe'] == device_data.universe and
+                existing['start_channel'] == device_data.start_channel):
+                raise HTTPException(status_code=400, detail="Another device with same IP, universe, and channel already exists")
+
+        # Store old channel count to check if values array needs resizing
+        old_channel_count = len(device.get('values', []))
+        new_channel_count = device_data.channel_count
+
+        # Update device properties
+        device['name'] = device_data.name
+        device['ip'] = device_data.ip
+        device['universe'] = device_data.universe
+        device['start_channel'] = device_data.start_channel
+        device['device_type'] = device_data.device_type
+        device['channel_count'] = new_channel_count
+
+        # Update fixture-specific fields if present
+        if hasattr(device_data, 'fixture_id') and device_data.fixture_id:
+            device['fixture_id'] = device_data.fixture_id
+        if hasattr(device_data, 'channel_layout') and device_data.channel_layout:
+            device['channel_layout'] = device_data.channel_layout
+
+        # Resize values array if channel count changed
+        if old_channel_count != new_channel_count:
+            old_values = device.get('values', [])
+            # Preserve existing values, pad with 0 or truncate as needed
+            device['values'] = (old_values + [0] * new_channel_count)[:new_channel_count]
+
+        save_devices()
+
+        # Re-initialize universe states to reflect changes
+        initialize_universe_states()
+
+        await broadcast_update({
+            'type': 'devices_updated',
+            'devices': devices
+        })
+
+        logger.info(f"Updated device: {device['name']} ({device['id']})")
+        return {"success": True, "device": device}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error updating device: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.delete("/api/devices/{device_id}")
 async def delete_device(device_id: str):
     """Löscht Gerät"""
@@ -2007,6 +2104,61 @@ async def activate_scene(scene_id: str):
     asyncio.create_task(fade_to_scene(scene_id))
 
     return {"success": True, "fading": True}
+
+
+@app.post("/api/blackout")
+async def blackout(data: dict):
+    """Sets all devices to zero (blackout) with optional fade"""
+    fade_time = data.get('fade_time', 0)  # seconds, 0 = instant
+
+    if fade_time > 0:
+        # Fade to black
+        asyncio.create_task(fade_all_to_black(fade_time))
+        return {"success": True, "fading": True}
+    else:
+        # Instant blackout
+        for device in devices:
+            for i in range(len(device['values'])):
+                device['values'][i] = 0
+            send_device_dmx(device)
+
+        save_devices()
+
+        await broadcast_update({
+            'type': 'devices_updated',
+            'devices': devices
+        })
+
+        return {"success": True, "fading": False}
+
+
+async def fade_all_to_black(fade_time: float):
+    """Fades all devices to black over specified time"""
+    steps = 20  # Number of fade steps
+    delay = fade_time / steps
+
+    # Store start values
+    start_values = {d['id']: d['values'].copy() for d in devices}
+
+    for step in range(steps + 1):
+        factor = 1 - (step / steps)  # 1.0 to 0.0
+
+        for device in devices:
+            start_vals = start_values.get(device['id'], [0] * len(device['values']))
+            for i in range(len(device['values'])):
+                device['values'][i] = int(start_vals[i] * factor)
+
+            send_device_dmx(device)
+
+        await asyncio.sleep(delay)
+
+    # Ensure all are exactly 0
+    for device in devices:
+        for i in range(len(device['values'])):
+            device['values'][i] = 0
+        send_device_dmx(device)
+
+    save_devices()
 
 
 # Gruppen API
@@ -2152,6 +2304,41 @@ async def stop_effect_endpoint(effect_id: str):
     """Stoppt einen laufenden Effekt"""
     success = await stop_effect(effect_id)
     return {"success": success}
+
+
+@app.put("/api/effects/{effect_id}")
+async def update_effect(effect_id: str, effect_data: EffectCreate):
+    """Updates effect configuration"""
+    try:
+        effect = next((e for e in effects if e['id'] == effect_id), None)
+
+        if not effect:
+            raise HTTPException(status_code=404, detail="Effect not found")
+
+        # Stop effect if currently running
+        if effect.get('active'):
+            await stop_effect(effect_id)
+
+        # Update effect properties
+        updated_data = effect_data.model_dump()
+        effect.update(updated_data)
+        effect['active'] = False  # Reset active state after editing
+
+        save_effects()
+
+        await broadcast_update({
+            'type': 'effects_updated',
+            'effects': effects
+        })
+
+        logger.info(f"Updated effect: {effect['name']} ({effect['id']})")
+        return {"success": True, "effect": effect}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error updating effect: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.delete("/api/effects/{effect_id}")

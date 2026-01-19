@@ -378,15 +378,21 @@ class DMXController {
         }
 
         try {
-            const response = await this.apiCall('/api/devices', {
-                method: 'POST',
+            // Determine if we're editing or adding
+            const isEdit = !!this.editingDevice;
+            const url = isEdit ? `/api/devices/${this.editingDevice.id}` : '/api/devices';
+            const method = isEdit ? 'PUT' : 'POST';
+
+            const response = await this.apiCall(url, {
+                method: method,
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(device)
             });
 
             if (response.ok) {
-                this.showToast('Gerät hinzugefügt', 'success');
+                this.showToast(isEdit ? 'Gerät aktualisiert' : 'Gerät hinzugefügt', 'success');
                 this.closeModal('addDeviceModal');
+                this.editingDevice = null;
                 document.getElementById('deviceName').value = '';
                 document.getElementById('deviceIp').value = '';
                 document.getElementById('deviceUniverse').value = '0';
@@ -421,14 +427,66 @@ class DMXController {
         }
     }
     
+    openDeviceModal(device = null) {
+        // Set edit mode flag
+        this.editingDevice = device;
+
+        const modal = document.getElementById('addDeviceModal');
+        const modalTitle = modal.querySelector('h2');
+
+        if (device) {
+            // Edit mode
+            modalTitle.textContent = 'Gerät bearbeiten';
+            document.getElementById('deviceName').value = device.name;
+            document.getElementById('deviceIp').value = device.ip;
+            document.getElementById('deviceUniverse').value = device.universe;
+            document.getElementById('deviceChannel').value = device.start_channel;
+
+            // Set fixture or device type
+            if (device.fixture_id) {
+                document.getElementById('fixtureSelect').value = device.fixture_id;
+                // Trigger change event to update UI
+                const event = new Event('change');
+                document.getElementById('fixtureSelect').dispatchEvent(event);
+            } else {
+                document.getElementById('fixtureSelect').value = '';
+                this.selectedFixture = null;
+                this.selectedDeviceType = device.device_type || 'dimmer';
+                document.getElementById('manualTypeGroup').style.display = 'block';
+                document.getElementById('fixtureInfo').style.display = 'none';
+            }
+        } else {
+            // Add mode
+            modalTitle.textContent = 'Gerät hinzufügen';
+            document.getElementById('deviceName').value = '';
+            document.getElementById('deviceIp').value = '';
+            document.getElementById('deviceUniverse').value = '0';
+            document.getElementById('deviceChannel').value = '1';
+            document.getElementById('fixtureSelect').value = '';
+            this.selectedFixture = null;
+            this.selectedDeviceType = 'dimmer';
+            document.getElementById('manualTypeGroup').style.display = 'block';
+            document.getElementById('fixtureInfo').style.display = 'none';
+        }
+
+        this.openModal('addDeviceModal');
+    }
+
+    editDevice(deviceId) {
+        const device = this.devices.find(d => d.id === deviceId);
+        if (device) {
+            this.openDeviceModal(device);
+        }
+    }
+
     async deleteDevice(deviceId) {
         if (!confirm('Gerät wirklich löschen?')) return;
-        
+
         try {
             const response = await this.apiCall(`/api/devices/${deviceId}`, {
                 method: 'DELETE'
             });
-            
+
             if (response.ok) {
                 this.showToast('Gerät gelöscht', 'success');
             }
@@ -560,7 +618,10 @@ class DMXController {
                         <h3>${device.name}</h3>
                         <p>${device.ip} · Universe ${device.universe} · Ch ${device.start_channel}</p>
                     </div>
-                    <button class="device-delete" onclick="app.deleteDevice('${device.id}')">×</button>
+                    <div class="device-actions">
+                        <button class="device-edit" onclick="app.editDevice('${device.id}')" title="Edit">✎</button>
+                        <button class="device-delete" onclick="app.deleteDevice('${device.id}')" title="Delete">×</button>
+                    </div>
                 </div>
                 <div class="device-controls">
                     ${controls}
@@ -636,10 +697,14 @@ class DMXController {
         this.groups.forEach(group => {
             const slider = document.getElementById(`group-slider-${group.id}`);
             if (slider) {
-                slider.addEventListener('input', (e) => {
+                // Handle both input (while dragging) and change (on release) events
+                const updateValue = (e) => {
                     document.getElementById(`group-value-${group.id}`).textContent = e.target.value;
                     this.updateGroupIntensity(group.id, e.target.value);
-                });
+                };
+
+                slider.addEventListener('input', updateValue);
+                slider.addEventListener('change', updateValue);
             }
         });
     }
@@ -678,7 +743,22 @@ class DMXController {
             this.showToast('Fade zur Szene...', 'success');
         } catch (error) { console.error(error); }
     }
-    
+
+    async blackout(fade = false) {
+        try {
+            const fadeTime = fade ? 2.0 : 0;  // 2 seconds fade or instant
+            await this.apiCall('/api/blackout', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ fade_time: fadeTime })
+            });
+            this.showToast(fade ? 'Blackout Fade...' : 'Blackout!', 'success');
+        } catch (error) {
+            console.error(error);
+            this.showToast('Blackout Fehler', 'error');
+        }
+    }
+
     renderScenes() {
         const container = document.getElementById('scenesContainer');
         if (this.scenes.length === 0) {
@@ -772,7 +852,8 @@ class DMXController {
     
     showModal(modalId) { document.getElementById(modalId).classList.add('active'); }
     closeModal(modalId) { document.getElementById(modalId).classList.remove('active'); }
-    showAddDevice() { this.showModal('addDeviceModal'); }
+    openModal(modalId) { this.showModal(modalId); }
+    showAddDevice() { this.openDeviceModal(null); }
     showAddScene() { if (this.devices.length === 0) { this.showToast('Bitte zuerst Geräte hinzufügen', 'error'); return; } this.showModal('addSceneModal'); }
     
     selectDeviceType(type) {
@@ -1072,8 +1153,8 @@ class DMXController {
     
     getChannelCount(deviceType) { return { dimmer: 1, rgb: 3, rgbw: 4 }[deviceType] || 1; }
     getChannelLabels(deviceType) {
-        const labels = { dimmer: ['Helligkeit'], rgb: ['Rot', 'Grün', 'Blau'], rgbw: ['Rot', 'Grün', 'Blau', 'Weiß'] };
-        return labels[deviceType] || ['Wert'];
+        const labels = { dimmer: ['Brightness'], rgb: ['Red', 'Green', 'Blue'], rgbw: ['Red', 'Green', 'Blue', 'White'] };
+        return labels[deviceType] || ['Value'];
     }
     
     setupKeyboardShortcuts() {
