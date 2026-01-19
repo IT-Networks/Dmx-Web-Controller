@@ -124,7 +124,11 @@ dmx_universe_events: Dict[tuple, asyncio.Event] = {}  # Event signals new data a
 dmx_universe_sequence: Dict[tuple, int] = {}  # Sequence numbers per universe
 
 # ArtNet standard: max 44 fps = ~22ms between packets
-DMX_SEND_RATE_LIMIT = 0.025  # 25ms = 40 fps (slightly conservative)
+# Reduced to prevent mechanical noise in moving heads and transformers
+DMX_SEND_RATE_LIMIT = 0.050  # 50ms = 20 fps (reduces "fip" sounds)
+
+# Minimum value change to trigger update (prevents micro-adjustments)
+DMX_VALUE_THRESHOLD = 2  # Only send if value changed by at least 2
 
 last_save_time = time.time()  # For auto-save debouncing
 save_devices_pending = False  # Flag for pending save operations
@@ -702,7 +706,17 @@ def update_device_dmx(device) -> tuple:
                 if 0 <= ch < 512:
                     old_value = universe_channels[ch]
                     new_value = max(0, min(255, int(val)))  # Clamp to 0-255
-                    if old_value != new_value:
+
+                    # Apply threshold to reduce micro-adjustments that cause mechanical noise
+                    # Always update for large changes, blackout (0), or full brightness (255)
+                    value_diff = abs(new_value - old_value)
+                    significant_change = (
+                        value_diff >= DMX_VALUE_THRESHOLD or  # Significant change
+                        new_value == 0 or new_value == 255 or  # Absolute values
+                        old_value == 0 or old_value == 255     # From absolute values
+                    )
+
+                    if significant_change and old_value != new_value:
                         values_changed = True
                         universe_channels[ch] = new_value
 
