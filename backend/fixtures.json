@@ -7,7 +7,7 @@
       "category": "dimmer",
       "channels": 1,
       "channel_layout": [
-        {"index": 0, "name": "Helligkeit", "type": "intensity"}
+        {"index": 0, "name": "Brightness", "type": "intensity"}
       ]
     },
     {
@@ -17,9 +17,9 @@
       "category": "rgb",
       "channels": 3,
       "channel_layout": [
-        {"index": 0, "name": "Rot", "type": "red"},
-        {"index": 1, "name": "Grün", "type": "green"},
-        {"index": 2, "name": "Blau", "type": "blue"}
+        {"index": 0, "name": "Red", "type": "red"},
+        {"index": 1, "name": "Green", "type": "green"},
+        {"index": 2, "name": "Blue", "type": "blue"}
       ]
     },
     {
@@ -29,10 +29,10 @@
       "category": "rgbw",
       "channels": 4,
       "channel_layout": [
-        {"index": 0, "name": "Rot", "type": "red"},
-        {"index": 1, "name": "Grün", "type": "green"},
-        {"index": 2, "name": "Blau", "type": "blue"},
-        {"index": 3, "name": "Weiß", "type": "white"}
+        {"index": 0, "name": "Red", "type": "red"},
+        {"index": 1, "name": "Green", "type": "green"},
+        {"index": 2, "name": "Blue", "type": "blue"},
+        {"index": 3, "name": "White", "type": "white"}
       ]
     },
     {
@@ -68,10 +68,10 @@
       "channels": 8,
       "channel_layout": [
         {"index": 0, "name": "Master Dimmer", "type": "intensity"},
-        {"index": 1, "name": "Rot", "type": "red"},
-        {"index": 2, "name": "Grün", "type": "green"},
-        {"index": 3, "name": "Blau", "type": "blue"},
-        {"index": 4, "name": "Weiß", "type": "white"},
+        {"index": 1, "name": "Red", "type": "red"},
+        {"index": 2, "name": "Green", "type": "green"},
+        {"index": 3, "name": "Blue", "type": "blue"},
+        {"index": 4, "name": "White", "type": "white"},
         {"index": 5, "name": "Strobe", "type": "shutter"},
         {"index": 6, "name": "Program", "type": "program"},
         {"index": 7, "name": "Program Speed", "type": "speed"}
@@ -84,9 +84,9 @@
       "category": "par",
       "channels": 7,
       "channel_layout": [
-        {"index": 0, "name": "Rot", "type": "red"},
-        {"index": 1, "name": "Grün", "type": "green"},
-        {"index": 2, "name": "Blau", "type": "blue"},
+        {"index": 0, "name": "Red", "type": "red"},
+        {"index": 1, "name": "Green", "type": "green"},
+        {"index": 2, "name": "Blue", "type": "blue"},
         {"index": 3, "name": "Master Dimmer", "type": "intensity"},
         {"index": 4, "name": "Strobe", "type": "shutter"},
         {"index": 5, "name": "Color Macro", "type": "color"},
@@ -107,19 +107,19 @@
         {"index": 4, "name": "Pan/Tilt Speed", "type": "speed"},
         {"index": 5, "name": "Master Dimmer", "type": "intensity"},
         {"index": 6, "name": "Strobe", "type": "shutter"},
-        {"index": 7, "name": "Rot All", "type": "red"},
-        {"index": 8, "name": "Grün All", "type": "green"},
-        {"index": 9, "name": "Blau All", "type": "blue"},
-        {"index": 10, "name": "Weiß All", "type": "white"},
+        {"index": 7, "name": "Red All", "type": "red"},
+        {"index": 8, "name": "Green All", "type": "green"},
+        {"index": 9, "name": "Blue All", "type": "blue"},
+        {"index": 10, "name": "White All", "type": "white"},
         {"index": 11, "name": "Color Macro", "type": "color"},
-        {"index": 12, "name": "Rot 1", "type": "red"},
-        {"index": 13, "name": "Grün 1", "type": "green"},
-        {"index": 14, "name": "Blau 1", "type": "blue"},
-        {"index": 15, "name": "Weiß 1", "type": "white"},
-        {"index": 16, "name": "Rot 2", "type": "red"},
-        {"index": 17, "name": "Grün 2", "type": "green"},
-        {"index": 18, "name": "Blau 2", "type": "blue"},
-        {"index": 19, "name": "Weiß 2", "type": "white"},
+        {"index": 12, "name": "Red 1", "type": "red"},
+        {"index": 13, "name": "Green 1", "type": "green"},
+        {"index": 14, "name": "Blue 1", "type": "blue"},
+        {"index": 15, "name": "White 1", "type": "white"},
+        {"index": 16, "name": "Red 2", "type": "red"},
+        {"index": 17, "name": "Green 2", "type": "green"},
+        {"index": 18, "name": "Blue 2", "type": "blue"},
+        {"index": 19, "name": "White 2", "type": "white"},
         {"index": 20, "name": "Settings", "type": "control"},
         {"index": 21, "name": "Reset", "type": "control"}
       ]
@@ -132,9 +132,9 @@
       "channels": 6,
       "channel_layout": [
         {"index": 0, "name": "Dimmer", "type": "intensity"},
-        {"index": 1, "name": "Rot", "type": "red"},
-        {"index": 2, "name": "Grün", "type": "green"},
-        {"index": 3, "name": "Blau", "type": "blue"},
+        {"index": 1, "name": "Red", "type": "red"},
+        {"index": 2, "name": "Green", "type": "green"},
+        {"index": 3, "name": "Blue", "type": "blue"},
         {"index": 4, "name": "Strobe", "type": "shutter"},
         {"index": 5, "name": "Sound Mode", "type": "control"}
       ]
@@ -205,10 +205,10 @@
       "category": "par",
       "channels": 12,
       "channel_layout": [
-        {"index": 0, "name": "Rot", "type": "red"},
-        {"index": 1, "name": "Grün", "type": "green"},
-        {"index": 2, "name": "Blau", "type": "blue"},
-        {"index": 3, "name": "Weiß", "type": "white"},
+        {"index": 0, "name": "Red", "type": "red"},
+        {"index": 1, "name": "Green", "type": "green"},
+        {"index": 2, "name": "Blue", "type": "blue"},
+        {"index": 3, "name": "White", "type": "white"},
         {"index": 4, "name": "Amber", "type": "amber"},
         {"index": 5, "name": "UV", "type": "uv"},
         {"index": 6, "name": "Dimmer", "type": "intensity"},

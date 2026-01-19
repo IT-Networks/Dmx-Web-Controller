@@ -1072,8 +1072,8 @@ class DMXController {
     
     getChannelCount(deviceType) { return { dimmer: 1, rgb: 3, rgbw: 4 }[deviceType] || 1; }
     getChannelLabels(deviceType) {
-        const labels = { dimmer: ['Helligkeit'], rgb: ['Rot', 'Grün', 'Blau'], rgbw: ['Rot', 'Grün', 'Blau', 'Weiß'] };
-        return labels[deviceType] || ['Wert'];
+        const labels = { dimmer: ['Brightness'], rgb: ['Red', 'Green', 'Blue'], rgbw: ['Red', 'Green', 'Blue', 'White'] };
+        return labels[deviceType] || ['Value'];
     }
     
     setupKeyboardShortcuts() {
