@@ -491,9 +491,10 @@ class DMXController {
         }
         
         container.innerHTML = this.devices.map(device => this.createDeviceCard(device)).join('');
-        
+
         this.devices.forEach(device => {
-            const channels = this.getChannelCount(device.device_type);
+            // Use actual channel count from device, not device_type mapping
+            const channels = device.values ? device.values.length : device.channel_count || 1;
             for (let i = 0; i < channels; i++) {
                 const slider = document.getElementById(`slider-${device.id}-${i}`);
                 if (slider) {
@@ -506,25 +507,31 @@ class DMXController {
             }
         });
     }
-    
+
     createDeviceCard(device) {
-        const channels = this.getChannelLabels(device.device_type);
+        // Generate controls based on actual values array length, not device_type
+        const channelCount = device.values ? device.values.length : device.channel_count || 1;
+        const channelLabels = this.getChannelLabels(device.device_type);
         const colors = ['', 'red', 'green', 'blue', 'white'];
-        
-        const controls = channels.map((label, idx) => `
+
+        // Create controls for all channels in values array
+        const controls = Array.from({length: channelCount}, (_, idx) => {
+            const label = channelLabels[idx] || `Kanal ${idx + 1}`;
+            return `
             <div class="control-row">
                 <span class="control-label">${label}</span>
                 <div class="slider-container">
-                    <input type="range" 
-                           class="slider ${colors[idx] || ''}" 
+                    <input type="range"
+                           class="slider ${colors[idx] || ''}"
                            id="slider-${device.id}-${idx}"
-                           min="0" 
-                           max="255" 
+                           min="0"
+                           max="255"
                            value="${device.values[idx] || 0}">
                 </div>
                 <span class="control-value" id="value-${device.id}-${idx}">${device.values[idx] || 0}</span>
             </div>
-        `).join('');
+        `;
+        }).join('');
         
         return `
             <div class="device-card">
