@@ -21,11 +21,11 @@ class DMXController {
         this.serverUrl = this.getServerUrl();
         this.wsUrl = this.getWebSocketUrl();
 
-        // DMX update throttling optimized for LED spots
+        // DMX update throttling: Balanced between speed and noise reduction
         this.dmxUpdateQueue = new Map(); // key -> {deviceId, channelIdx, value}
         this.dmxSendPending = false;
         this.dmxSendTimer = null;
-        this.DMX_UPDATE_INTERVAL = 100; // ms between batches (10fps, reduces PWM noise)
+        this.DMX_UPDATE_INTERVAL = 30; // ms between batches (fast response, batched updates)
 
         // Truss system
         this.trusses = [];
