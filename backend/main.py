@@ -1900,6 +1900,67 @@ async def add_device(device_data: DeviceCreate):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.put("/api/devices/{device_id}")
+async def update_device(device_id: str, device_data: DeviceCreate):
+    """Updates device configuration"""
+    try:
+        device = next((d for d in devices if d.get('id') == device_id), None)
+
+        if not device:
+            raise HTTPException(status_code=404, detail="Device not found")
+
+        # Check for duplicate on different device (excluding current device)
+        for existing in devices:
+            if (existing['id'] != device_id and
+                existing['ip'] == device_data.ip and
+                existing['universe'] == device_data.universe and
+                existing['start_channel'] == device_data.start_channel):
+                raise HTTPException(status_code=400, detail="Another device with same IP, universe, and channel already exists")
+
+        # Store old channel count to check if values array needs resizing
+        old_channel_count = len(device.get('values', []))
+        new_channel_count = device_data.channel_count
+
+        # Update device properties
+        device['name'] = device_data.name
+        device['ip'] = device_data.ip
+        device['universe'] = device_data.universe
+        device['start_channel'] = device_data.start_channel
+        device['device_type'] = device_data.device_type
+        device['channel_count'] = new_channel_count
+
+        # Update fixture-specific fields if present
+        if hasattr(device_data, 'fixture_id') and device_data.fixture_id:
+            device['fixture_id'] = device_data.fixture_id
+        if hasattr(device_data, 'channel_layout') and device_data.channel_layout:
+            device['channel_layout'] = device_data.channel_layout
+
+        # Resize values array if channel count changed
+        if old_channel_count != new_channel_count:
+            old_values = device.get('values', [])
+            # Preserve existing values, pad with 0 or truncate as needed
+            device['values'] = (old_values + [0] * new_channel_count)[:new_channel_count]
+
+        save_devices()
+
+        # Re-initialize universe states to reflect changes
+        initialize_universe_states()
+
+        await broadcast_update({
+            'type': 'devices_updated',
+            'devices': devices
+        })
+
+        logger.info(f"Updated device: {device['name']} ({device['id']})")
+        return {"success": True, "device": device}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error updating device: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.delete("/api/devices/{device_id}")
 async def delete_device(device_id: str):
     """Löscht Gerät"""
