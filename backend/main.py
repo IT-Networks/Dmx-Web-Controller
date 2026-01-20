@@ -7,23 +7,25 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, Field, field_validator
 import json
 import asyncio
 from pathlib import Path
-from typing import List, Dict, Optional
-import socket
-import struct
-from threading import Thread, Lock
+from typing import List, Dict
+from threading import Lock
 import time
 import os
 import logging
 import shutil
 from datetime import datetime
-import ipaddress
 import math
 from contextlib import asynccontextmanager
 from queue import Queue, Empty
+
+# Import core modules
+from core.config import config, BASE_DIR, FRONTEND_DIR, DATA_DIR, BACKUP_DIR
+from core.config import CONFIG_FILE, SCENES_FILE, GROUPS_FILE, EFFECTS_FILE, SEQUENCES_FILE
+from core.dmx_controller import ArtNetController
+from core.models import DeviceCreate, SceneCreate, GroupCreate, EffectCreate, SequenceCreate
 
 # Logging Configuration
 logging.basicConfig(
@@ -36,29 +38,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# System Limits & Configuration
-class Config:
-    MAX_ACTIVE_EFFECTS = 20
-    MAX_ACTIVE_SEQUENCES = 5
-    MAX_DEVICES = 100
-    MAX_SCENES = 200
-    MAX_GROUPS = 50
-    MAX_SEQUENCE_STEPS = 100
-    MAX_NAME_LENGTH = 100
-    BACKUP_RETENTION_DAYS = 7
-    AUTO_SAVE_INTERVAL = 30  # seconds
-    DMX_CHANNEL_MIN = 1
-    DMX_CHANNEL_MAX = 512
-    EFFECT_TIMEOUT = 3600  # 1 hour max runtime
-    SEQUENCE_TIMEOUT = 7200  # 2 hours max runtime
-
-config = Config()
-
-# Determine base path for files
-BASE_DIR = Path(__file__).parent.parent
-FRONTEND_DIR = BASE_DIR / "frontend"
-if not FRONTEND_DIR.exists():
-    FRONTEND_DIR = Path("/app/frontend")  # Docker fallback
+# Config and paths are now imported from core.config
 
 # Lifespan event handler (defined early, but load_data() is defined later)
 @asynccontextmanager
@@ -80,16 +60,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Datenpfade
-DATA_DIR = Path("/data") if Path("/data").exists() else BASE_DIR / "data"
-DATA_DIR.mkdir(exist_ok=True)
-BACKUP_DIR = DATA_DIR / "backups"
-BACKUP_DIR.mkdir(exist_ok=True)
-CONFIG_FILE = DATA_DIR / "dmx_config.json"
-SCENES_FILE = DATA_DIR / "dmx_scenes.json"
-GROUPS_FILE = DATA_DIR / "dmx_groups.json"
-EFFECTS_FILE = DATA_DIR / "dmx_effects.json"
-SEQUENCES_FILE = DATA_DIR / "dmx_sequences.json"
+# Paths are now imported from core.config
 
 # Mount static files
 app.mount("/static", StaticFiles(directory=str(FRONTEND_DIR)), name="static")
@@ -125,170 +96,11 @@ last_save_time = time.time()  # For auto-save debouncing
 save_devices_pending = False  # Flag for pending save operations
 SAVE_DEBOUNCE_INTERVAL = 2.0  # seconds
 
-
-class ArtNetController:
-    """Art-Net DMX Controller with error handling and reconnection"""
-
-    ARTNET_PORT = 6454
-    ARTNET_HEADER = b'Art-Net\x00'
-    OPCODE_DMX = 0x5000
-    PROTOCOL_VERSION = 14
-
-    def __init__(self):
-        self.sock = None
-        self.error_count = 0
-        self.last_error_time = 0
-        self._init_socket()
-
-    def _init_socket(self):
-        """Initialize or reinitialize socket"""
-        try:
-            if self.sock:
-                self.sock.close()
-            self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-            self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
-            self.sock.settimeout(1.0)  # 1 second timeout
-            logger.info("Art-Net socket initialized")
-        except Exception as e:
-            logger.error(f"Failed to initialize Art-Net socket: {e}")
-            raise
-
-    def send_dmx(self, ip: str, universe: int, channels: List[int]) -> bool:
-        """Sendet DMX via Art-Net with error handling"""
-        try:
-            # Validate inputs
-            if not channels or len(channels) > 512:
-                logger.warning(f"Invalid channel count: {len(channels)}")
-                return False
-
-            # ArtNet DMX packet format:
-            # - Must send even number of channels (ArtNet spec)
-            # - Always send full 512 channels for consistency
-            num_channels = 512
-
-            # Get/increment sequence number for this universe
-            if not hasattr(self, 'sequences'):
-                self.sequences = {}
-            if universe not in self.sequences:
-                self.sequences[universe] = 1
-            else:
-                self.sequences[universe] = (self.sequences[universe] + 1) % 256
-
-            sequence = self.sequences[universe]
-
-            # Build packet header (18 bytes)
-            header = bytearray(18)
-            header[0:8] = self.ARTNET_HEADER              # "Art-Net\x00"
-            header[8:10] = struct.pack('<H', self.OPCODE_DMX)  # OpOutput = 0x5000
-            header[10:12] = struct.pack('>H', self.PROTOCOL_VERSION)  # ProtVer = 14
-            header[12] = sequence                          # Sequence (1-255, helps detect lost packets)
-            header[13] = 0                                 # Physical port
-            header[14:16] = struct.pack('<H', universe)    # Universe (little-endian)
-            header[16:18] = struct.pack('>H', num_channels)  # Length (big-endian)
-
-            # Build data payload (512 bytes)
-            # Ensure all 512 channels are sent, padding with 0 if needed
-            data = bytearray(num_channels)
-            for i in range(min(len(channels), num_channels)):
-                data[i] = max(0, min(255, int(channels[i])))  # Clamp to 0-255
-
-            # Combine header + data
-            packet = header + data
-
-            # Send complete packet (18 + 512 = 530 bytes)
-            bytes_sent = self.sock.sendto(packet, (ip, self.ARTNET_PORT))
-
-            if bytes_sent != len(packet):
-                logger.warning(f"ArtNet packet size mismatch: sent {bytes_sent} bytes, expected {len(packet)}")
-
-            # Reset error count on success
-            if self.error_count > 0:
-                self.error_count = 0
-                logger.info(f"Art-Net communication recovered for {ip}")
-
-            return True
-
-        except socket.timeout:
-            logger.warning(f"DMX send timeout to {ip}")
-            return False
-        except socket.error as e:
-            self.error_count += 1
-            current_time = time.time()
-
-            # Log only if it's a new error or 10 seconds passed
-            if current_time - self.last_error_time > 10:
-                logger.error(f"DMX socket error to {ip}: {e} (count: {self.error_count})")
-                self.last_error_time = current_time
-
-            # Try to reinitialize socket after 5 errors
-            if self.error_count >= 5:
-                logger.warning("Attempting to reinitialize Art-Net socket")
-                try:
-                    self._init_socket()
-                    self.error_count = 0
-                except Exception as reinit_error:
-                    logger.error(f"Socket reinit failed: {reinit_error}")
-
-            return False
-        except Exception as e:
-            logger.error(f"Unexpected DMX send error to {ip}: {e}", exc_info=True)
-            return False
-
-
+# ArtNetController is now imported from core.dmx_controller
 controller = ArtNetController()
 
 
-# Pydantic Models for Input Validation
-class DeviceCreate(BaseModel):
-    name: str = Field(..., max_length=config.MAX_NAME_LENGTH, min_length=1)
-    ip: str
-    universe: int = Field(ge=0, le=15)
-    start_channel: int = Field(ge=config.DMX_CHANNEL_MIN, le=config.DMX_CHANNEL_MAX)
-    channel_count: int = Field(ge=1, le=512)
-    device_type: str
-    fixture_id: Optional[str] = None
-    channel_layout: Optional[List[Dict]] = None
-
-    @field_validator('ip')
-    @classmethod
-    def validate_ip(cls, v):
-        try:
-            ipaddress.ip_address(v)
-            return v
-        except ValueError:
-            raise ValueError('Invalid IP address')
-
-    @field_validator('name')
-    @classmethod
-    def validate_name(cls, v):
-        if not v.strip():
-            raise ValueError('Name cannot be empty')
-        return v.strip()
-
-
-class SceneCreate(BaseModel):
-    name: str = Field(..., max_length=config.MAX_NAME_LENGTH, min_length=1)
-    color: str = Field(default="blue")
-    device_values: Optional[Dict[str, List[int]]] = None
-
-
-class GroupCreate(BaseModel):
-    name: str = Field(..., max_length=config.MAX_NAME_LENGTH, min_length=1)
-    device_ids: List[str] = Field(..., min_length=1)
-
-
-class EffectCreate(BaseModel):
-    name: str = Field(..., max_length=config.MAX_NAME_LENGTH, min_length=1)
-    type: str
-    target_ids: List[str] = Field(..., min_length=1)
-    params: Dict = Field(default_factory=dict)
-    is_group: bool = False
-
-
-class SequenceCreate(BaseModel):
-    name: str = Field(..., max_length=config.MAX_NAME_LENGTH, min_length=1)
-    loop: bool = False
-    steps: List[Dict] = Field(..., max_length=config.MAX_SEQUENCE_STEPS)
+# Pydantic Models are now imported from core.models
 
 
 # Backup & Data Persistence Functions
