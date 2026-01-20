@@ -117,20 +117,16 @@ current_audio_data: Dict[str, float] = {  # Current audio levels from clients
 dmx_universe_state: Dict[tuple, List[int]] = {}
 dmx_universe_lock = Lock()  # Thread-safe access to universe state
 
-# Universe worker tasks - one dedicated worker per universe
-# Key: (ip, universe) -> asyncio.Task (worker that continuously sends)
-dmx_universe_workers: Dict[tuple, asyncio.Task] = {}
-dmx_universe_events: Dict[tuple, asyncio.Event] = {}  # Event signals new data available
-dmx_universe_sequence: Dict[tuple, int] = {}  # Sequence numbers per universe
+# SIMPLIFIED: Just track last send time per universe for rate limiting
+# Key: (ip, universe) -> last_send_timestamp
+dmx_universe_last_send: Dict[tuple, float] = {}
 
 # ArtNet standard: max 44 fps = ~22ms between packets
-# Balanced for LED spots: Fast response but prevents PWM noise
+# Simple approach: Just check time since last send before sending
 DMX_SEND_RATE_LIMIT = 0.040  # 40ms = 25 fps (responsive + quiet)
 
-# Minimal threshold to allow gradual slider movements
-# The worker rate limiting (40ms) is the primary defense against PWM noise
-# This threshold only prevents identical consecutive values (sensor noise)
-DMX_VALUE_THRESHOLD = 1  # Only filter if change is 0 (rely on worker rate limiting)
+# No value threshold - send ALL changes immediately (rate limiting handles noise)
+DMX_VALUE_THRESHOLD = 0  # Send every change (rely only on rate limiting)
 
 last_save_time = time.time()  # For auto-save debouncing
 save_devices_pending = False  # Flag for pending save operations
@@ -554,124 +550,56 @@ def initialize_universe_states():
 
             logger.info(f"Initialized universe {device_ip}:{device_universe} with {len(devs)} devices")
 
-    # Start workers for each universe and send initial state
+    # Send initial state for each universe
     for universe_key in dmx_universe_state.keys():
         device_ip, device_universe = universe_key
-        # Mark as dirty to send initial state
-        mark_universe_dirty(device_ip, device_universe)
+        # Send initial state (rate limiting will be bypassed on first send)
+        send_universe_now(device_ip, device_universe)
 
 
 # DMX Universe Worker - One worker per universe (state-of-the-art approach)
-async def universe_send_worker(device_ip: str, device_universe: int):
+def send_universe_now(device_ip: str, device_universe: int) -> bool:
     """
-    Dedicated worker for sending DMX updates for one universe.
-    Implements ArtNet best practices:
-    - Single thread per universe (no parallel sends)
-    - Rate limiting (40 fps max)
-    - Sequence numbers
-    - Event-driven (no updates lost)
-    - Atomic sends
+    SIMPLIFIED: Send DMX universe immediately with simple rate limiting.
+    No workers, no events, no complexity - just send if enough time passed.
 
-    This worker runs continuously and sends updates when signaled by event.
+    This is how most DMX controllers work: Direct send with rate check.
     """
     universe_key = (device_ip, device_universe)
-    event = dmx_universe_events[universe_key]
+    current_time = time.time()
 
-    # Initialize sequence number
-    dmx_universe_sequence[universe_key] = 0
-    last_send_time = 0
+    # Check rate limiting
+    last_send = dmx_universe_last_send.get(universe_key, 0)
+    time_since_last = current_time - last_send
 
-    try:
-        logger.info(f"[WORKER] DMX worker started for universe {device_ip}:{device_universe}")
-        while True:
-            # Wait for event signaling new data is available
-            logger.debug(f"[WORKER] Waiting for event on universe {device_ip}:{device_universe}")
-            await event.wait()
-            logger.debug(f"[WORKER] Event received for universe {device_ip}:{device_universe}")
+    # If we sent too recently, skip this update (next update will include these changes)
+    if time_since_last < DMX_SEND_RATE_LIMIT:
+        logger.debug(f"[DMX] Rate limited: {device_ip}:{device_universe} (last send {time_since_last:.3f}s ago)")
+        return False
 
-            # Rate limiting: enforce minimum time between sends
-            current_time = time.time()
-            time_since_last = current_time - last_send_time
+    # Get universe state (thread-safe)
+    with dmx_universe_lock:
+        if universe_key not in dmx_universe_state:
+            logger.warning(f"Universe {universe_key} not in state")
+            return False
+        channels_to_send = dmx_universe_state[universe_key].copy()
 
-            if time_since_last < DMX_SEND_RATE_LIMIT:
-                # Wait until rate limit allows next send
-                sleep_time = DMX_SEND_RATE_LIMIT - time_since_last
-                logger.debug(f"[WORKER] Rate limiting: sleeping {sleep_time:.3f}s for universe {device_ip}:{device_universe}")
-                await asyncio.sleep(sleep_time)
+    # Send immediately
+    success = controller.send_dmx(device_ip, device_universe, channels_to_send)
 
-            # CRITICAL: Clear event and take snapshot atomically
-            # This prevents race condition where update happens between clear and snapshot
-            with dmx_universe_lock:
-                if universe_key not in dmx_universe_state:
-                    logger.warning(f"Universe {universe_key} not found in state, worker stopping")
-                    break
+    if success:
+        dmx_universe_last_send[universe_key] = current_time
 
-                # Clear event INSIDE lock - prevents updates between clear and snapshot
-                event.clear()
+        # Log critical values (0 or 255) for debugging
+        critical_channels = [(i, v) for i, v in enumerate(channels_to_send) if v == 0 or v == 255]
+        if critical_channels and len(critical_channels) <= 10:
+            logger.info(f"[DMX SENT] {device_ip}:{device_universe} - Critical: {critical_channels[:10]}")
+        else:
+            logger.debug(f"[DMX SENT] {device_ip}:{device_universe}")
+    else:
+        logger.warning(f"[DMX] Failed to send to {device_ip}:{device_universe}")
 
-                # Make a copy for sending (atomic snapshot immediately after clear)
-                channels_to_send = dmx_universe_state[universe_key].copy()
-                logger.debug(f"[WORKER] Snapshot taken for universe {device_ip}:{device_universe}")
-
-            # Increment sequence number
-            dmx_universe_sequence[universe_key] = (dmx_universe_sequence[universe_key] + 1) % 256
-
-            # Send the universe (I/O outside lock)
-            logger.debug(f"[WORKER] Sending DMX to {device_ip}:{device_universe}")
-            success = controller.send_dmx(device_ip, device_universe, channels_to_send)
-
-            if not success:
-                logger.warning(f"[WORKER] Failed to send DMX universe {device_ip}:{device_universe}")
-            else:
-                # Check if any critical values (0 or 255) are being sent
-                critical_channels = [(i, v) for i, v in enumerate(channels_to_send) if v == 0 or v == 255]
-                if critical_channels and len(critical_channels) <= 10:  # Only log if not too many
-                    logger.info(f"[DMX SENT] Universe {device_ip}:{device_universe} - Critical values: {critical_channels[:10]}")
-                else:
-                    logger.debug(f"[WORKER] DMX sent successfully to {device_ip}:{device_universe}")
-
-            last_send_time = time.time()
-
-            # If event was set again during send, it will trigger next iteration
-            # This ensures NO updates are lost
-
-    except asyncio.CancelledError:
-        logger.debug(f"DMX worker for universe {device_ip}:{device_universe} stopped")
-        raise
-    except Exception as e:
-        logger.error(f"DMX worker for universe {device_ip}:{device_universe} crashed: {e}", exc_info=True)
-    finally:
-        # Cleanup
-        if universe_key in dmx_universe_workers:
-            del dmx_universe_workers[universe_key]
-        if universe_key in dmx_universe_events:
-            del dmx_universe_events[universe_key]
-
-
-def mark_universe_dirty(device_ip: str, device_universe: int):
-    """
-    Marks a universe as having pending changes that need to be sent.
-    Uses asyncio.Event to signal worker without losing updates.
-    Starts a worker if one doesn't exist for this universe.
-    """
-    universe_key = (device_ip, device_universe)
-
-    # Create event if it doesn't exist
-    if universe_key not in dmx_universe_events:
-        dmx_universe_events[universe_key] = asyncio.Event()
-        logger.info(f"[WORKER] Created new event for universe {device_ip}:{device_universe}")
-
-    # Signal event - worker will send when ready
-    dmx_universe_events[universe_key].set()
-    logger.debug(f"[WORKER] Event set for universe {device_ip}:{device_universe}")
-
-    # Start worker if it doesn't exist
-    if universe_key not in dmx_universe_workers:
-        worker = asyncio.create_task(universe_send_worker(device_ip, device_universe))
-        dmx_universe_workers[universe_key] = worker
-        logger.info(f"[WORKER] Created DMX worker for universe {device_ip}:{device_universe}")
-
-    return True
+    return success
 
 
 # DMX Senden mit Thread-Safe Universe-basierter State-Verwaltung
@@ -717,7 +645,7 @@ def update_device_dmx(device) -> tuple:
             # Get current universe state (make a reference, not a copy)
             universe_channels = dmx_universe_state[universe_key]
 
-            # Update device channels in the universe
+            # Update device channels in the universe - SIMPLIFIED: No filtering
             values_changed = False
             for i, val in enumerate(device_values):
                 ch = start_ch + i
@@ -725,28 +653,16 @@ def update_device_dmx(device) -> tuple:
                     old_value = universe_channels[ch]
                     new_value = max(0, min(255, int(val)))  # Clamp to 0-255
 
-                    # CRITICAL: Always update blackout (0) and full (255) immediately
-                    # These are safety-critical values that must NEVER be filtered
-                    is_critical_value = (new_value == 0 or new_value == 255)
-
-                    # Debug logging for critical values
-                    if is_critical_value and old_value != new_value:
-                        logger.info(f"[CRITICAL UPDATE] Device '{device_name}' DMX Ch {ch+1}: {old_value} -> {new_value} (BYPASSING THRESHOLD)")
-
-                    # Apply threshold only for non-critical values
-                    if not is_critical_value:
-                        value_diff = abs(new_value - old_value)
-                        # Skip update if change is too small (reduces PWM noise)
-                        if value_diff < DMX_VALUE_THRESHOLD and old_value != 0 and old_value != 255:
-                            logger.debug(f"[SKIP] Device '{device_name}' DMX Ch {ch+1}: {old_value} -> {new_value} (diff={value_diff} < threshold={DMX_VALUE_THRESHOLD})")
-                            continue
-
                     # Update if value actually changed
                     if old_value != new_value:
                         values_changed = True
                         universe_channels[ch] = new_value
-                        if is_critical_value:
-                            logger.info(f"[APPLIED] Device '{device_name}' DMX Ch {ch+1} now = {new_value}")
+
+                        # Log critical values (0, 255) for debugging
+                        if new_value == 0 or new_value == 255:
+                            logger.info(f"[UPDATE] Device '{device_name}' Ch {ch+1}: {old_value} -> {new_value}")
+                        else:
+                            logger.debug(f"[UPDATE] Device '{device_name}' Ch {ch+1}: {old_value} -> {new_value}")
 
         return (device_ip, device_universe, values_changed)
 
@@ -768,8 +684,8 @@ def send_device_dmx(device) -> bool:
         return False
 
     if values_changed:
-        # Mark universe as dirty - worker will handle sending
-        mark_universe_dirty(device_ip, device_universe)
+        # Send immediately (simple rate limiting inside function)
+        send_universe_now(device_ip, device_universe)
 
     return True
 
@@ -2647,12 +2563,11 @@ async def websocket_endpoint(websocket: WebSocket):
                     if value == 0 or value == 255:
                         logger.info(f"[CRITICAL] update_device_dmx returned: values_changed={values_changed}")
 
-                    # Mark universe as dirty if values changed
-                    # The dedicated worker will handle sending with proper rate limiting
+                    # Send immediately if values changed (simple rate limiting)
                     if values_changed and device_ip and device_universe is not None:
-                        mark_universe_dirty(device_ip, device_universe)
+                        send_universe_now(device_ip, device_universe)
                         if value == 0 or value == 255:
-                            logger.info(f"[CRITICAL] Marked universe {device_universe} at {device_ip} as dirty")
+                            logger.info(f"[CRITICAL] Sent update for universe {device_universe} at {device_ip}")
 
                     # Schedule debounced save (don't block on I/O)
                     if not save_devices_pending:
