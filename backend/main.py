@@ -117,16 +117,9 @@ current_audio_data: Dict[str, float] = {  # Current audio levels from clients
 dmx_universe_state: Dict[tuple, List[int]] = {}
 dmx_universe_lock = Lock()  # Thread-safe access to universe state
 
-# SIMPLIFIED: Just track last send time per universe for rate limiting
-# Key: (ip, universe) -> last_send_timestamp
-dmx_universe_last_send: Dict[tuple, float] = {}
-
-# ArtNet standard: max 44 fps = ~22ms between packets
-# Simple approach: Just check time since last send before sending
-DMX_SEND_RATE_LIMIT = 0.040  # 40ms = 25 fps (responsive + quiet)
-
-# No value threshold - send ALL changes immediately (rate limiting handles noise)
-DMX_VALUE_THRESHOLD = 0  # Send every change (rely only on rate limiting)
+# MAXIMALLY SIMPLIFIED: No backend rate limiting, no thresholds
+# Frontend throttles at 25ms (40fps) - that's enough
+# Backend just sends every change immediately
 
 last_save_time = time.time()  # For auto-save debouncing
 save_devices_pending = False  # Flag for pending save operations
@@ -560,22 +553,12 @@ def initialize_universe_states():
 # DMX Universe Worker - One worker per universe (state-of-the-art approach)
 def send_universe_now(device_ip: str, device_universe: int) -> bool:
     """
-    SIMPLIFIED: Send DMX universe immediately with simple rate limiting.
-    No workers, no events, no complexity - just send if enough time passed.
+    MAXIMALLY SIMPLIFIED: Send DMX universe IMMEDIATELY, no rate limiting.
 
-    This is how most DMX controllers work: Direct send with rate check.
+    Frontend already throttles (25ms), so backend should just send everything.
+    This matches how simple DMX controllers work: UI throttles, backend sends.
     """
     universe_key = (device_ip, device_universe)
-    current_time = time.time()
-
-    # Check rate limiting
-    last_send = dmx_universe_last_send.get(universe_key, 0)
-    time_since_last = current_time - last_send
-
-    # If we sent too recently, skip this update (next update will include these changes)
-    if time_since_last < DMX_SEND_RATE_LIMIT:
-        logger.debug(f"[DMX] Rate limited: {device_ip}:{device_universe} (last send {time_since_last:.3f}s ago)")
-        return False
 
     # Get universe state (thread-safe)
     with dmx_universe_lock:
@@ -584,12 +567,10 @@ def send_universe_now(device_ip: str, device_universe: int) -> bool:
             return False
         channels_to_send = dmx_universe_state[universe_key].copy()
 
-    # Send immediately
+    # Send immediately - NO rate limiting (frontend handles that)
     success = controller.send_dmx(device_ip, device_universe, channels_to_send)
 
     if success:
-        dmx_universe_last_send[universe_key] = current_time
-
         # Log critical values (0 or 255) for debugging
         critical_channels = [(i, v) for i, v in enumerate(channels_to_send) if v == 0 or v == 255]
         if critical_channels and len(critical_channels) <= 10:
@@ -674,9 +655,8 @@ def update_device_dmx(device) -> tuple:
 # Legacy function for backward compatibility
 def send_device_dmx(device) -> bool:
     """
-    Legacy function - updates universe state and marks for sending.
-    Kept for backward compatibility with existing code (scenes, effects, etc).
-    Now uses the worker-based system for proper rate limiting.
+    Convenience function for scenes, effects, groups, etc.
+    Updates universe state and sends DMX immediately.
     """
     device_ip, device_universe, values_changed = update_device_dmx(device)
 
@@ -684,7 +664,7 @@ def send_device_dmx(device) -> bool:
         return False
 
     if values_changed:
-        # Send immediately (simple rate limiting inside function)
+        # Send immediately - no rate limiting (frontend handles that)
         send_universe_now(device_ip, device_universe)
 
     return True
@@ -2559,15 +2539,9 @@ async def websocket_endpoint(websocket: WebSocket):
                     # Direct call is faster than asyncio.to_thread for CPU-bound work
                     device_ip, device_universe, values_changed = update_device_dmx(device_snapshot)
 
-                    # Extra logging for critical values
-                    if value == 0 or value == 255:
-                        logger.info(f"[CRITICAL] update_device_dmx returned: values_changed={values_changed}")
-
-                    # Send immediately if values changed (simple rate limiting)
+                    # Send immediately if values changed
                     if values_changed and device_ip and device_universe is not None:
                         send_universe_now(device_ip, device_universe)
-                        if value == 0 or value == 255:
-                            logger.info(f"[CRITICAL] Sent update for universe {device_universe} at {device_ip}")
 
                     # Schedule debounced save (don't block on I/O)
                     if not save_devices_pending:
