@@ -502,8 +502,19 @@ class DMXController {
 
         if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
 
-        const intValue = parseInt(value);
+        // Ensure we have a valid integer, default to 0 if invalid
+        let intValue = parseInt(value, 10);
+        if (isNaN(intValue) || intValue < 0 || intValue > 255) {
+            console.warn(`Invalid DMX value: ${value}, clamping to valid range`);
+            intValue = Math.max(0, Math.min(255, intValue || 0));
+        }
+
         const isCriticalValue = (intValue === 0 || intValue === 255);
+
+        // Debug logging for critical values
+        if (isCriticalValue) {
+            console.log(`[DMX] CRITICAL VALUE: Device ${deviceId}, Ch ${channelIdx}, Value ${intValue} - IMMEDIATE SEND`);
+        }
 
         // ALWAYS send critical values immediately, bypass throttling
         if (isCriticalValue) {
@@ -592,8 +603,21 @@ class DMXController {
                     // Handle both input (while dragging) and change (on release) events
                     // This ensures value is sent even if mouse leaves slider area
                     const updateValue = (e) => {
-                        const value = parseInt(e.target.value);
-                        document.getElementById(`value-${device.id}-${i}`).textContent = value;
+                        const value = parseInt(e.target.value, 10);
+                        const valueDisplay = document.getElementById(`value-${device.id}-${i}`);
+
+                        // Validate and ensure proper integer
+                        if (isNaN(value)) {
+                            console.error(`Invalid slider value: ${e.target.value}`);
+                            return;
+                        }
+
+                        // Update display
+                        if (valueDisplay) {
+                            valueDisplay.textContent = value;
+                        }
+
+                        // Update device value
                         this.updateDeviceValue(device.id, i, value);
                     };
 
