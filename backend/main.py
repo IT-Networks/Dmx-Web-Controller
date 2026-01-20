@@ -614,6 +614,11 @@ async def universe_send_worker(device_ip: str, device_universe: int):
 
             if not success:
                 logger.warning(f"Failed to send DMX universe {device_ip}:{device_universe}")
+            else:
+                # Check if any critical values (0 or 255) are being sent
+                critical_channels = [(i, v) for i, v in enumerate(channels_to_send) if v == 0 or v == 255]
+                if critical_channels and len(critical_channels) <= 10:  # Only log if not too many
+                    logger.info(f"[DMX SENT] Universe {device_ip}:{device_universe} - Critical values: {critical_channels[:10]}")
 
             last_send_time = time.time()
 
@@ -714,14 +719,14 @@ def update_device_dmx(device) -> tuple:
 
                     # Debug logging for critical values
                     if is_critical_value and old_value != new_value:
-                        logger.info(f"[CRITICAL UPDATE] Device '{device_name}' DMX Ch {ch+1}: {old_value} → {new_value} (BYPASSING THRESHOLD)")
+                        logger.info(f"[CRITICAL UPDATE] Device '{device_name}' DMX Ch {ch+1}: {old_value} -> {new_value} (BYPASSING THRESHOLD)")
 
                     # Apply threshold only for non-critical values
                     if not is_critical_value:
                         value_diff = abs(new_value - old_value)
                         # Skip update if change is too small (reduces PWM noise)
                         if value_diff < DMX_VALUE_THRESHOLD and old_value != 0 and old_value != 255:
-                            logger.debug(f"[SKIP] Device '{device_name}' DMX Ch {ch+1}: {old_value} → {new_value} (diff={value_diff} < threshold={DMX_VALUE_THRESHOLD})")
+                            logger.debug(f"[SKIP] Device '{device_name}' DMX Ch {ch+1}: {old_value} -> {new_value} (diff={value_diff} < threshold={DMX_VALUE_THRESHOLD})")
                             continue
 
                     # Update if value actually changed
@@ -2610,7 +2615,7 @@ async def websocket_endpoint(websocket: WebSocket):
                     device['values'][channel_idx] = value
 
                     if value == 0 and old_value != 0:
-                        logger.info(f"[BLACKOUT] Device '{device.get('name')}' channel {channel_idx}: {old_value} → 0")
+                        logger.info(f"[BLACKOUT] Device '{device.get('name')}' channel {channel_idx}: {old_value} -> 0")
 
                     # Create a snapshot of device data for thread-safe DMX processing
                     device_snapshot = {
@@ -2634,6 +2639,8 @@ async def websocket_endpoint(websocket: WebSocket):
                     # The dedicated worker will handle sending with proper rate limiting
                     if values_changed and device_ip and device_universe is not None:
                         mark_universe_dirty(device_ip, device_universe)
+                        if value == 0 or value == 255:
+                            logger.info(f"[CRITICAL] Marked universe {device_universe} at {device_ip} as dirty")
 
                     # Schedule debounced save (don't block on I/O)
                     if not save_devices_pending:
