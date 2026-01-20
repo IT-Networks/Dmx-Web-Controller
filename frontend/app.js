@@ -498,10 +498,26 @@ class DMXController {
     
     updateDeviceValue(deviceId, channelIdx, value) {
         // Immediate send with throttling (not debouncing!)
-        // Backend handles rate limiting, frontend just prevents flooding
+        // CRITICAL: Blackout (0) and full (255) are NEVER throttled - safety first!
 
         if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
 
+        const intValue = parseInt(value);
+        const isCriticalValue = (intValue === 0 || intValue === 255);
+
+        // ALWAYS send critical values immediately, bypass throttling
+        if (isCriticalValue) {
+            this.ws.send(JSON.stringify({
+                type: 'update_device_value',
+                device_id: deviceId,
+                channel_idx: channelIdx,
+                value: intValue
+            }));
+            this.dmxLastSendTime = Date.now();
+            return;
+        }
+
+        // Normal throttling for non-critical values
         const now = Date.now();
         const timeSinceLastSend = now - this.dmxLastSendTime;
 
@@ -511,7 +527,7 @@ class DMXController {
                 type: 'update_device_value',
                 device_id: deviceId,
                 channel_idx: channelIdx,
-                value: parseInt(value)
+                value: intValue
             }));
             this.dmxLastSendTime = now;
         } else {
@@ -520,7 +536,7 @@ class DMXController {
             this.dmxUpdateQueue.set(key, {
                 deviceId,
                 channelIdx,
-                value: parseInt(value)
+                value: intValue
             });
 
             // Schedule send after throttle period

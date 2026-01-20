@@ -708,16 +708,19 @@ def update_device_dmx(device) -> tuple:
                     old_value = universe_channels[ch]
                     new_value = max(0, min(255, int(val)))  # Clamp to 0-255
 
-                    # Apply threshold to reduce micro-adjustments that cause mechanical noise
-                    # Always update for large changes, blackout (0), or full brightness (255)
-                    value_diff = abs(new_value - old_value)
-                    significant_change = (
-                        value_diff >= DMX_VALUE_THRESHOLD or  # Significant change
-                        new_value == 0 or new_value == 255 or  # Absolute values
-                        old_value == 0 or old_value == 255     # From absolute values
-                    )
+                    # CRITICAL: Always update blackout (0) and full (255) immediately
+                    # These are safety-critical values that must NEVER be filtered
+                    is_critical_value = (new_value == 0 or new_value == 255)
 
-                    if significant_change and old_value != new_value:
+                    # Apply threshold only for non-critical values
+                    if not is_critical_value:
+                        value_diff = abs(new_value - old_value)
+                        # Skip update if change is too small (reduces PWM noise)
+                        if value_diff < DMX_VALUE_THRESHOLD and old_value != 0 and old_value != 255:
+                            continue
+
+                    # Update if value actually changed
+                    if old_value != new_value:
                         values_changed = True
                         universe_channels[ch] = new_value
 
