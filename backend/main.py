@@ -269,7 +269,7 @@ class DeviceCreate(BaseModel):
 class SceneCreate(BaseModel):
     name: str = Field(..., max_length=config.MAX_NAME_LENGTH, min_length=1)
     color: str = Field(default="blue")
-    device_values: Dict[str, List[int]]
+    device_values: Optional[Dict[str, List[int]]] = None
 
 
 class GroupCreate(BaseModel):
@@ -682,7 +682,13 @@ def get_group_devices(group_id: str):
 
 def set_group_values(group_id: str, values: dict):
     """Setzt Werte für alle Geräte in einer Gruppe (intelligent für unterschiedliche Fixtures)"""
+    group = next((g for g in groups if g['id'] == group_id), None)
     group_devices = get_group_devices(group_id)
+
+    # Save master intensity to group if provided
+    if group and 'intensity' in values:
+        group['master_intensity'] = int(values['intensity'])
+        save_groups()
 
     for device in group_devices:
         # Setze Intensität wenn vorhanden
@@ -2111,6 +2117,7 @@ async def add_group(group: dict):
     """Erstellt neue Gruppe"""
     group['id'] = f"group_{int(time.time() * 1000)}"
     group['device_ids'] = group.get('device_ids', [])
+    group['master_intensity'] = 0  # Initial master intensity
 
     groups.append(group)
     save_groups()

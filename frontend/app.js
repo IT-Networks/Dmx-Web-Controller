@@ -748,7 +748,8 @@ class DMXController {
         container.innerHTML = this.groups.map(group => {
             const groupDevices = this.devices.filter(d => group.device_ids.includes(d.id));
             const deviceNames = groupDevices.map(d => d.name).join(', ');
-            return `<div class="group-card"><div class="group-header"><div class="group-info"><h3>${group.name}</h3><p>${groupDevices.length} Geräte: ${deviceNames}</p></div><button class="group-delete" onclick="app.deleteGroup('${group.id}')">×</button></div><div class="group-controls"><div class="group-master"><div class="group-master-title">Master Intensity</div><div class="control-row"><span class="control-label">Alle</span><div class="slider-container"><input type="range" class="slider" id="group-slider-${group.id}" min="0" max="255" value="0"></div><span class="control-value" id="group-value-${group.id}">0</span></div></div></div></div>`;
+            const masterIntensity = group.master_intensity || 0;
+            return `<div class="group-card"><div class="group-header"><div class="group-info"><h3>${group.name}</h3><p>${groupDevices.length} Geräte: ${deviceNames}</p></div><button class="group-delete" onclick="app.deleteGroup('${group.id}')">×</button></div><div class="group-controls"><div class="group-master"><div class="group-master-title">Master Intensity</div><div class="control-row"><span class="control-label">Alle</span><div class="slider-container"><input type="range" class="slider" id="group-slider-${group.id}" min="0" max="255" value="${masterIntensity}"></div><span class="control-value" id="group-value-${group.id}">${masterIntensity}</span></div></div></div></div>`;
         }).join('');
         this.groups.forEach(group => {
             const slider = document.getElementById(`group-slider-${group.id}`);
