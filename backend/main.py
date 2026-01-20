@@ -1443,6 +1443,10 @@ async def fade_to_scene(scene_id: str):
     for step in range(steps + 1):
         progress = step / steps
 
+        # Track which universes need to be sent
+        affected_universes = set()
+
+        # Update all device values first (in memory only)
         for data in fade_data:
             device = data['device']
             start = data['start']
@@ -1452,7 +1456,15 @@ async def fade_to_scene(scene_id: str):
                 if i < len(target):
                     device['values'][i] = int(start[i] + (target[i] - start[i]) * progress)
 
-            send_device_dmx(device)
+            # Update universe state
+            device_ip, device_universe, values_changed = update_device_dmx(device)
+            if values_changed and device_ip and device_universe is not None:
+                affected_universes.add((device_ip, device_universe))
+
+        # Send all affected universes at once (parallel DMX sends)
+        for universe_key in affected_universes:
+            device_ip, device_universe = universe_key
+            send_universe_now(device_ip, device_universe)
 
         await asyncio.sleep(delay)
 
@@ -1899,20 +1911,40 @@ async def fade_all_to_black(fade_time: float):
     for step in range(steps + 1):
         factor = 1 - (step / steps)  # 1.0 to 0.0
 
+        # Track which universes need to be sent
+        affected_universes = set()
+
+        # Update all device values first
         for device in devices:
             start_vals = start_values.get(device['id'], [0] * len(device['values']))
             for i in range(len(device['values'])):
                 device['values'][i] = int(start_vals[i] * factor)
 
-            send_device_dmx(device)
+            # Update universe state
+            device_ip, device_universe, values_changed = update_device_dmx(device)
+            if values_changed and device_ip and device_universe is not None:
+                affected_universes.add((device_ip, device_universe))
+
+        # Send all affected universes at once
+        for universe_key in affected_universes:
+            device_ip, device_universe = universe_key
+            send_universe_now(device_ip, device_universe)
 
         await asyncio.sleep(delay)
 
     # Ensure all are exactly 0
+    affected_universes = set()
     for device in devices:
         for i in range(len(device['values'])):
             device['values'][i] = 0
-        send_device_dmx(device)
+        device_ip, device_universe, values_changed = update_device_dmx(device)
+        if values_changed and device_ip and device_universe is not None:
+            affected_universes.add((device_ip, device_universe))
+
+    # Final send for all universes
+    for universe_key in affected_universes:
+        device_ip, device_universe = universe_key
+        send_universe_now(device_ip, device_universe)
 
     save_devices()
 
