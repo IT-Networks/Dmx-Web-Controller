@@ -21,11 +21,10 @@ class DMXController {
         this.serverUrl = this.getServerUrl();
         this.wsUrl = this.getWebSocketUrl();
 
-        // DMX update throttling: Balanced between speed and noise reduction
+        // DMX update throttling: Immediate send with backend rate limiting
         this.dmxUpdateQueue = new Map(); // key -> {deviceId, channelIdx, value}
-        this.dmxSendPending = false;
-        this.dmxSendTimer = null;
-        this.DMX_UPDATE_INTERVAL = 30; // ms between batches (fast response, batched updates)
+        this.dmxLastSendTime = 0;
+        this.DMX_THROTTLE_MS = 25; // Minimum time between sends (40fps)
 
         // Truss system
         this.trusses = [];
@@ -498,43 +497,55 @@ class DMXController {
     }
     
     updateDeviceValue(deviceId, channelIdx, value) {
-        const key = `${deviceId}-${channelIdx}`;
+        // Immediate send with throttling (not debouncing!)
+        // Backend handles rate limiting, frontend just prevents flooding
 
-        // Update queue with latest value
-        this.dmxUpdateQueue.set(key, {
-            deviceId,
-            channelIdx,
-            value: parseInt(value)
-        });
+        if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
 
-        // Debounce: Clear previous timer and set new one
-        // This reduces rapid-fire updates that cause PWM noise
-        if (this.dmxSendTimer) {
-            clearTimeout(this.dmxSendTimer);
+        const now = Date.now();
+        const timeSinceLastSend = now - this.dmxLastSendTime;
+
+        // Send immediately if enough time passed
+        if (timeSinceLastSend >= this.DMX_THROTTLE_MS) {
+            this.ws.send(JSON.stringify({
+                type: 'update_device_value',
+                device_id: deviceId,
+                channel_idx: channelIdx,
+                value: parseInt(value)
+            }));
+            this.dmxLastSendTime = now;
+        } else {
+            // Queue for next send (throttled)
+            const key = `${deviceId}-${channelIdx}`;
+            this.dmxUpdateQueue.set(key, {
+                deviceId,
+                channelIdx,
+                value: parseInt(value)
+            });
+
+            // Schedule send after throttle period
+            if (this.dmxUpdateQueue.size === 1) {
+                setTimeout(() => this.processDMXUpdateQueue(), this.DMX_THROTTLE_MS - timeSinceLastSend);
+            }
         }
-
-        this.dmxSendTimer = setTimeout(() => {
-            this.processDMXUpdateQueue();
-        }, this.DMX_UPDATE_INTERVAL);
     }
 
     processDMXUpdateQueue() {
-        this.dmxSendTimer = null;
+        if (this.dmxUpdateQueue.size === 0) return;
+        if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
 
         // Send all queued updates
-        if (this.dmxUpdateQueue.size > 0 && this.ws && this.ws.readyState === WebSocket.OPEN) {
-            this.dmxUpdateQueue.forEach((update) => {
-                this.ws.send(JSON.stringify({
-                    type: 'update_device_value',
-                    device_id: update.deviceId,
-                    channel_idx: update.channelIdx,
-                    value: update.value
-                }));
-            });
+        this.dmxUpdateQueue.forEach((update) => {
+            this.ws.send(JSON.stringify({
+                type: 'update_device_value',
+                device_id: update.deviceId,
+                channel_idx: update.channelIdx,
+                value: update.value
+            }));
+        });
 
-            // Clear queue after sending
-            this.dmxUpdateQueue.clear();
-        }
+        this.dmxUpdateQueue.clear();
+        this.dmxLastSendTime = Date.now();
     }
     
     renderDevices() {
