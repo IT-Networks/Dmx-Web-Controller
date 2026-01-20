@@ -127,9 +127,10 @@ dmx_universe_sequence: Dict[tuple, int] = {}  # Sequence numbers per universe
 # Balanced for LED spots: Fast response but prevents PWM noise
 DMX_SEND_RATE_LIMIT = 0.040  # 40ms = 25 fps (responsive + quiet)
 
-# Higher threshold prevents micro-adjustments that cause PWM noise
-# This is the KEY to eliminating "fip" sounds without sacrificing speed
-DMX_VALUE_THRESHOLD = 5  # Only send if value changed by at least 5
+# Minimal threshold to allow gradual slider movements
+# The worker rate limiting (40ms) is the primary defense against PWM noise
+# This threshold only prevents identical consecutive values (sensor noise)
+DMX_VALUE_THRESHOLD = 1  # Only filter if change is 0 (rely on worker rate limiting)
 
 last_save_time = time.time()  # For auto-save debouncing
 save_devices_pending = False  # Flag for pending save operations
