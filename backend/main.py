@@ -214,6 +214,18 @@ def load_data():
     effects = safe_load(EFFECTS_FILE, "effects")
     sequences = safe_load(SEQUENCES_FILE, "sequences")
 
+    # Migrate old groups to add master_intensity field if missing
+    groups_updated = False
+    for group in groups:
+        if 'master_intensity' not in group:
+            group['master_intensity'] = 0  # Default to 0 for old groups
+            groups_updated = True
+            logger.info(f"Migrated group '{group.get('name')}' - added master_intensity=0")
+
+    if groups_updated:
+        save_groups()
+        logger.info("Groups migration completed - saved updated groups")
+
     # Load fixture library
     fixtures_file = BASE_DIR / "backend" / "fixtures.json"
     try:
@@ -1424,8 +1436,10 @@ async def fade_to_scene(scene_id: str):
         is_fading = False
         return
 
-    steps = 50
-    delay = 2.0 / steps
+    # Optimized for smooth and fast transitions
+    steps = 30  # Reduced from 50 for less overhead
+    fade_time = 1.0  # Reduced from 2.0 for faster transitions (1 second)
+    delay = fade_time / steps  # ~33ms per frame = 30fps
 
     # Sammle Fade-Daten
     fade_data = []
